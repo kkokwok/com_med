@@ -1,1 +1,1825 @@
+####### REMOVE ALL OBJECTS IN WORKPLACE ########
+rm(list=ls())
+
+
+
+####### LOAD PACKAGE #######
+library(haven)
+library(dplyr)
+library(lavaan)
+library(psych)
+library(ggplot2)
+library(ggpubr)
+library(semTools)
+library(foreign)
+library(tidyr)
+library(multiplex)
+library(ggthemes)
+library(here)
+library(naniar)
+
+library(writexl)
+library(readxl)
+library(lme4)
+library(Hmisc)
+library(lm.beta)
+library(jtools)
+library(magrittr)
+library(stats)
+library(srvyr)
+library(data.table)
+library(Rmisc)
+library(lubridate)
+library(panelr)
+library(gee)
+library(geepack)
+library(multgee)
+library(fitdistrplus)
+library(epiDisplay)
+library(mgcv)
+library(sjmisc)
+library(sjPlot)
+library(car)
+library(lavaan)
+library(semPlot)
+library(semTools)
+library(epiDisplay)
+library(janitor)
+library(purrr)
+
+
+######### READ RAW FILES ##########
+CS_LONG <- read_excel(here::here("CS_LONG_GITHUB.xlsx"))
+
+CS_MATCH <- read_excel(here::here("CS_MATCH_GITHUB.xlsx"))
+
+
+####### PASTE LTI FROM R10,11,13,1 TO R11
+# Load necessary package
+library(dplyr)
+
+# Fill in the value of LTI for ROUND == 11
+CS_LONG <- CS_LONG %>%
+  group_by(PID) %>%
+  # Compute the desired value for ROUND == 11 based on priority
+  mutate(
+    # Create a variable to store the LTI value for ROUND 11
+    LTI_for_11 = ifelse(
+      ROUND == 11,
+      # Check each round in order of priority to find the first non-NA value
+      dplyr::case_when(
+        any(ROUND == 10 & !is.na(LTI)) ~ LTI[ROUND == 10 & !is.na(LTI)][1], # Priority 1: ROUND 10
+        any(ROUND == 12 & !is.na(LTI)) ~ LTI[ROUND == 12 & !is.na(LTI)][1], # Priority 2: ROUND 12
+        any(ROUND == 13 & !is.na(LTI)) ~ LTI[ROUND == 13 & !is.na(LTI)][1], # Priority 3: ROUND 13
+        any(ROUND == 1 & !is.na(LTI))  ~ LTI[ROUND == 1 & !is.na(LTI)][1],  # Priority 4: ROUND 1
+        TRUE ~ NA_real_  # Default to NA if no values are found
+      ),
+      LTI # Keep the original LTI if not ROUND 11
+    )
+  ) %>%
+  ungroup() %>%
+  # Update LTI for ROUND == 11
+  mutate(
+    LTI = ifelse(ROUND == 11, LTI_for_11, LTI)
+  ) %>%
+  # Remove the temporary column
+  dplyr::select(-LTI_for_11)
+
+
+
+
+
+
+### FIX THE INCONSISTENT VACCINATION DATES
+library(dplyr)
+library(lubridate)
+
+# Function to safely convert any date input to Date format
+safe_as_date <- function(x) {
+  # Convert to Date format if possible
+  as.Date(x, origin = "1970-01-01")
+}
+
+# Function to pick the most reasonable date based on your rules
+pick_date <- function(dates, previous_date = NA, exclude_dates = c(), round_order = NULL) {
+  # Convert all dates to Date format
+  dates <- safe_as_date(dates[!is.na(dates)])
+  
+  # Exclude any dates that should not be considered
+  if (length(exclude_dates) > 0) {
+    exclude_dates <- safe_as_date(exclude_dates)
+    dates <- dates[!dates %in% exclude_dates]
+  }
+  
+  if (length(dates) == 0) return(NA) # If all dates are NA or excluded, return NA
+  
+  # Get the most common date
+  most_common_date <- as.Date(names(sort(table(dates), decreasing = TRUE))[1], origin = "1970-01-01")
+  
+  # Ensure the most common date is after the previous dose date
+  valid_dates <- as.Date(names(sort(table(dates), decreasing = TRUE)), origin = "1970-01-01")
+  if (!is.na(previous_date)) {
+    previous_date <- safe_as_date(previous_date)
+    valid_dates <- valid_dates[valid_dates > previous_date]
+  }
+  
+  # Ensure the valid date is not in the list of dates to exclude
+  valid_dates <- valid_dates[!valid_dates %in% exclude_dates]
+  
+  # If there are valid dates, return the most common valid date
+  if (length(valid_dates) > 0) {
+    return(valid_dates[1])
+  }
+  
+  # If no valid dates from the most common, pick the earliest date reported by round order
+  if (!is.null(round_order)) {
+    round_order <- safe_as_date(round_order)
+    for (round_date in round_order) {
+      if (!is.na(round_date) && !round_date %in% exclude_dates && (is.na(previous_date) || round_date > previous_date)) {
+        return(round_date)
+      }
+    }
+  }
+  
+  # Return NA if no valid dates are found
+  return(NA)
+}
+
+# Function to process each participant's data
+process_participant <- function(df) {
+  df <- df %>%
+    mutate(
+      # Use df$column_name to access each column
+      DateCD1 = as.Date(pick_date(c(df$DateCD1_r8, df$DateCD1_r9, df$DateCD1_r10, df$DateCD1_r11, df$DateCD1_r12, df$DateCD1_r13, df$DateCD1_r14, df$DateCD1_r15), round_order = c(df$DateCD1_r8, df$DateCD1_r9, df$DateCD1_r10, df$DateCD1_r11, df$DateCD1_r12, df$DateCD1_r13, df$DateCD1_r14, df$DateCD1_r15))),
+      DateCD2 = as.Date(pick_date(c(df$DateCD2_r10, df$DateCD2_r11, df$DateCD2_r12, df$DateCD2_r13, df$DateCD2_r14, df$DateCD2_r15), previous_date = DateCD1, exclude_dates = c(DateCD1), round_order = c(df$DateCD2_r10, df$DateCD2_r11, df$DateCD2_r12, df$DateCD2_r13, df$DateCD2_r14, df$DateCD2_r15))),
+      DateCD3 = as.Date(pick_date(c(df$DateCD3_r10, df$DateCD3_r11, df$DateCD3_r12, df$DateCD3_r13, df$DateCD3_r14, df$DateCD3_r15), previous_date = DateCD2, exclude_dates = c(DateCD1, DateCD2), round_order = c(df$DateCD3_r10, df$DateCD3_r11, df$DateCD3_r12, df$DateCD3_r13, df$DateCD3_r14, df$DateCD3_r15))),
+      DateCD4 = as.Date(pick_date(c(df$DateCD4_r12, df$DateCD4_r13, df$DateCD4_r14, df$DateCD4_r15), previous_date = DateCD3, exclude_dates = c(DateCD1, DateCD2, DateCD3), round_order = c(df$DateCD4_r12, df$DateCD4_r13, df$DateCD4_r14, df$DateCD4_r15))),
+      DateCD5 = as.Date(pick_date(c(df$DateCD5_r15), previous_date = DateCD4, exclude_dates = c(DateCD1, DateCD2, DateCD3, DateCD4), round_order = c(df$DateCD5_r15)))
+    )
+  
+  # Check if DateCD2 is NA but DateCD1 and DateCD3 are filled
+  if (is.na(df$DateCD2) && !is.na(df$DateCD1) && !is.na(df$DateCD3)) {
+    # Look for non-common alternatives for DateCD1
+    alternative_DateCD1 <- as.Date(names(sort(table(c(df$DateCD1_r8, df$DateCD1_r9, df$DateCD1_r10, df$DateCD1_r11, df$DateCD1_r12, df$DateCD1_r13, df$DateCD1_r14, df$DateCD1_r15)), decreasing = FALSE)), origin = "1970-01-01")
+    alternative_DateCD1 <- alternative_DateCD1[alternative_DateCD1 < df$DateCD3] # Ensure it's before DateCD3
+    
+    # Check if any alternative DateCD1 can be used to resolve the conflict
+    if (length(alternative_DateCD1) > 0) {
+      # Update DateCD1 with a suitable alternative that allows for a valid DateCD2
+      df$DateCD1 <- alternative_DateCD1[1]
+      
+      # Recalculate DateCD2 with the new DateCD1
+      df$DateCD2 <- as.Date(pick_date(c(df$DateCD2_r10, df$DateCD2_r11, df$DateCD2_r12, df$DateCD2_r13, df$DateCD2_r14, df$DateCD2_r15), previous_date = df$DateCD1, exclude_dates = c(df$DateCD1), round_order = c(df$DateCD2_r10, df$DateCD2_r11, df$DateCD2_r12, df$DateCD2_r13, df$DateCD2_r14, df$DateCD2_r15)))
+    }
+  }
+  
+  return(df)
+}
+
+# Apply the function to each participant
+CS_MATCH <- CS_MATCH %>%
+  group_split(PID) %>%  # Assuming 'PID' is the identifier for each participant
+  map_dfr(process_participant)
+
+
+
+
+
+CS_POS <- CS_MATCH %>% dplyr::select(PID, COVPOS, COVPOS2, COVPOS3, DatePOS, DatePOS2, DatePOS3, DateCD1, DateCD2, DateCD3, DateCD4, DateCD5)
+CS_LROUND <- CS_MATCH %>%
+  dplyr::select(PID, LROUND)
+CS_LONG <- left_join(CS_LONG, CS_LROUND, by="PID")
+CS_LONG <- CS_LONG %>% dplyr::select(-COVpos, -DateCD1, -DateCD2, -DateCD3, -DateCD4)
+CS_LONG <- left_join(CS_LONG, CS_POS, by="PID")
+CS_FULL <- left_join(CS_FULL, CS_LROUND, by="PID")
+
+####### CATEGORIZE THE CONTINOUS VARIABLE ######
+#CS_LONG <- CS_LONG %>%
+#  mutate(AGE = case_when (AGE==1 ~21, AGE==2 ~29.5, AGE==3 ~39.5, AGE==4 ~49.5, AGE==5 ~59.5, AGE==6 ~69.5))
+
+####### SEARCH THOSE WITH NEGATIVE CD1_DAY AND CD3_DAY #######
+CS_LONGneg <- CS_LONG %>% filter(CD1_DAY<0) %>% dplyr::select (PID, ROUND, DateCD1, ansDATE, CD1, CVAC)
+CS_LONGneg3 <- CS_LONG %>% filter(CD3_DAY<0) %>% dplyr::select (PID, ROUND, DateCD3, ansDATE, CD3, CVAC)
+
+
+
+############# ADJUSTMENT TO THE REQUIRED TIME FOR VACCINATING BOOSTERS ############ 
+CS_LONG <- CS_LONG %>%
+  mutate_at(vars(starts_with("OCC_")), ~ifelse(. != "FALSE", TRUE, FALSE))
+
+
+
+
+##### DAYS SINCE THE START OF VACCINE PROGRAM IN HK ######
+#### FIRST DOSE ####
+CS_LONG <- CS_LONG %>%
+  mutate(
+    # Adjusted rollout date for the first dose based on priority groups and vaccine availability
+    CD1RO_demo = case_when(
+      # POLICY A: 26 FEB 2021 for 60+, HCW, RCHE, public service, border (SD: 26/2/2021)
+      AGE >= 59.5 | OCC_med == TRUE | OCC_qdriv == TRUE | OCC_qhotel == TRUE | OCC_qfac == TRUE | OCC_ctc == TRUE |
+        OCC_odriv == TRUE | OCC_cargo == TRUE | OCC_ship == TRUE | OCC_airp == TRUE | OCC_ds == TRUE 
+      ~ ymd("2021-02-26"), 
+      
+      # POLICY B: 9 MAR 2021 for 599F staff (catering, market, public transport, architecture, school, property, travelling) (SD: 9/3/2021)
+      OCC_wait == TRUE | OCC_cater == TRUE | OCC_del == TRUE | OCC_comm == TRUE | OCC_craft == TRUE | 
+        OCC_jan == TRUE | OCC_teach == TRUE | OCC_hotel == TRUE | OCC_ps == TRUE | OCC_ret == TRUE 
+      ~ ymd("2021-03-09"),
+      
+      # POLICY C: 16 MAR 2021 for 30+ (>=29.5), also include individuals covered in POLICY A and B (SD: 16/3/2021)
+      AGE >= 29.5 
+      ~ ymd("2021-03-16"),
+      
+      # POLICY D: 23 APR 2021 for 16+ (SD: 23/4/2021)
+      AGE >= 18 
+      ~ ymd("2021-04-23"),
+      TRUE ~ as.Date(NA)  # Ensure default NA value for no match as Date type
+    )) %>%
+  mutate(CD1RO_demo = as.POSIXct(CD1RO_demo)) %>%
+  
+  ### POLICY H: Take into account infections ### (AD: 21/5/2021)
+  ### POLICY I: Only one dose needed after infection (AD: 3/11/2021)
+  mutate(
+    # Determine if POLICY H applies based on the date of infections and buffer periods
+    POLICY_H_applies = if_else(!is.na(DatePOS) & DatePOS <= ymd("2021-05-21") & (DatePOS + days(90)) > ymd("2021-05-21"), TRUE, FALSE),
+    
+    # Calculate buffer period end dates due to infections
+    CD1POS_buffer_end1 = if_else(POLICY_H_applies, as.Date(DatePOS + days(90)), as.Date(NA)),  # First infection buffer end
+    CD1POS_buffer_end2 = if_else(!is.na(DatePOS2) & (DatePOS2 + days(90)) > CD1RO_demo, as.Date(DatePOS2 + days(90)), as.Date(NA)), # Second infection buffer end
+    
+    # Calculate latency when the vaccination date is after the infections
+    CD1_LATENCY_BEFORE_INF1 = if_else(!is.na(DatePOS) & DateCD1 > DatePOS, 
+                                      as.numeric(difftime(DatePOS, CD1RO_demo, units = "days")), 0),
+    
+    CD1_LATENCY_AFTER_BUFFER1 = if_else(!is.na(DatePOS) & DateCD1 > DatePOS & DateCD1 > CD1POS_buffer_end1, 
+                                        as.numeric(difftime(DateCD1, CD1POS_buffer_end1, units = "days")), 0),
+    
+    CD1_LATENCY_BEFORE_INF2 = if_else(!is.na(DatePOS2) & DateCD1 > DatePOS2 & DatePOS2 > CD1RO_demo, 
+                                      as.numeric(difftime(DatePOS2, CD1RO_demo, units = "days")), 0),
+    
+    CD1_LATENCY_AFTER_BUFFER2 = if_else(!is.na(DatePOS2) & DateCD1 > DatePOS2 & DateCD1 > CD1POS_buffer_end2,
+                                        as.numeric(difftime(DateCD1, CD1POS_buffer_end2, units = "days")), 0),
+    
+    # Calculate the total latency for the first dose (CD1_DAY)
+    CD1_DAY = case_when(
+      # No infections, direct calculation
+      is.na(DatePOS) & is.na(DatePOS2) ~ as.numeric(difftime(DateCD1, CD1RO_demo, units = "days")),  # No infections
+      (DateCD1 <= DatePOS | DateCD1 <= DatePOS2) ~ as.numeric(difftime(DateCD1, CD1RO_demo, units = "days")),
+      TRUE ~ CD1_LATENCY_BEFORE_INF1 + CD1_LATENCY_AFTER_BUFFER1 + CD1_LATENCY_BEFORE_INF2 + CD1_LATENCY_AFTER_BUFFER2
+    ),
+    
+    CD1_DAYNA = as.duration(interval(ymd("2021-02-26"),ymd(DateCD1)))/ddays(1),
+    CD1_DAYVR = as.duration(interval(ymd("2021-09-01"),ymd(DateCD1)))/ddays(1),
+    CD1_DAYVP = as.duration(interval(ymd("2022-02-24"),ymd(DateCD1)))/ddays(1)
+  ) %>%
+  
+  
+  #### THIRD DOSE ####
+mutate(
+  # Calculate demographic-based rollout date for the third dose
+  CD3RO_demo = case_when(
+    # POLICY E: 11 NOV 2021 for immunocompromised and high-risk (SD: 11/11/2021)
+    IMMUSUP == 1 | ORGTRAN == 1 | LTI == 1 | AGE >= 59.5 | OCC_med == TRUE | OCC_qdriv == TRUE | OCC_qhotel == TRUE | OCC_qfac == TRUE | 
+      OCC_ctc == TRUE | OCC_odriv == TRUE | OCC_cargo == TRUE | OCC_ship == TRUE | OCC_airp == TRUE | OCC_ds == TRUE 
+    ~ ymd("2021-11-11"),
+    
+    # POLICY F: 23 NOV 2021 for 18+ and vaccinated with 2 doses of Sinovac (SD: 23/11/2021)
+    CVd1_type == 1 
+    ~ ymd("2021-11-23"),
+    
+    # POLICY G: 1 JAN 2022 for 18+ (SD: 1/1/2022)
+    AGE >= 18 
+    ~ ymd("2022-01-01"),
+    
+    TRUE ~ as.Date(NA) # Default to NA if no conditions are met
+  ),
+  
+  # Determine the buffer period for immunocompromised individuals first
+  CD3RO_d2immu = case_when(
+    # Shortest buffer for immunocompromised persons
+    (IMMUSUP == 1 | ORGTRAN == 1 | LTI_canc == 3)  ~ pmax(DateCD2 + days(28), ymd("2021-11-11")),
+    TRUE ~ as.Date(NA) # Default to NA if not immunocompromised
+  ),
+  
+  # POLICY E, F, G: Adjust the initial buffer period based on the timing of the second dose
+  CD3RO_d2old = pmax(DateCD2 + days(180), CD3RO_demo, na.rm = TRUE),  # Consider the later of DateCD2 + 180 days or CD3RO_demo
+  
+  # Adjust eligibility date considering Policies L and M
+  CD3RO_d2new = case_when(
+    # Use the buffer for immunocompromised persons if applicable
+    !is.na(CD3RO_d2immu) ~ CD3RO_d2immu,
+    
+    # POLICY L: For persons aged >=59.5 (AD: 2022-03-05)
+    AGE >= 59.5 & (DateCD2 + days(90) >= ymd("2022-03-05")) ~ pmax(DateCD2 + days(90), ymd("2022-03-05")),
+    AGE >= 59.5 & (DateCD2 + days(180) >= ymd("2022-03-05")) ~ ymd("2022-03-05"),
+    
+    # POLICY M: For persons aged 18-59.5 (AD: 2022-03-21)
+    AGE < 59.5 & (DateCD2 + days(90) >= ymd("2022-03-21")) ~ pmax(DateCD2 + days(90), ymd("2022-03-21")),
+    AGE < 59.5 & (DateCD2 + days(180) >= ymd("2022-03-21")) ~ ymd("2022-03-21"),
+    
+    # Default case: Use the original 180-day buffer
+    TRUE ~ CD3RO_d2old
+  ),
+  
+  # Adjust CD3RO_d2demo by considering the demographic rollout date and the new eligibility date
+  CD3RO_d2demo = pmax(CD3RO_demo, CD3RO_d2new, na.rm = TRUE)
+) %>%
+  
+  ### Separate Handling for POLICY J ###
+  mutate(
+    # Check if POLICY J should be considered
+    consider_policy_J = (DateCD3 > ymd("2022-05-21")) & 
+      ((DatePOS < DateCD3 & !is.na(DatePOS)) | 
+         (DatePOS2 < DateCD3 & !is.na(DatePOS2))) &
+      ((DatePOS + days(90) > ymd("2022-05-21")) |
+         (DatePOS2 + days(90) > ymd("2022-05-21")) |
+         (DateCD2 + days(180) > ymd("2022-05-21"))),
+    
+    # Apply POLICY J when applicable
+    CD3RO_policy_J = case_when(
+      consider_policy_J ~ pmax(CD3RO_d2demo, 
+                               pmax(DateCD2 + days(180), 
+                                    pmax(DatePOS, DatePOS2, na.rm = TRUE) + days(180))),
+      TRUE ~ CD3RO_d2demo  # Use the existing eligibility date if POLICY J is not applicable
+    ),
+    
+    # Use adjusted CD3RO_policy_J for further calculations
+    CD3RO_d2demo = CD3RO_policy_J
+  ) %>%
+  
+  ### Infection Handling for Third Dose ###
+  mutate(
+    # Calculate the buffer end dates for both infections
+    CD3POS_buffer_end1 = if_else(!is.na(DatePOS) & DatePOS < DateCD3, as.Date(DatePOS + days(90)), as.Date(NA)),  # First infection buffer end if before DateCD3
+    CD3POS_buffer_end2 = if_else(!is.na(DatePOS2) & DatePOS2 < DateCD3, as.Date(DatePOS2 + days(90)), as.Date(NA)), # Second infection buffer end if before DateCD3
+    
+    # Calculate latency when the vaccination date is after the infections
+    CD3_LATENCY_BEFORE_INF1 = if_else(!is.na(DatePOS) & DateCD3 > DatePOS & DatePOS > CD3RO_demo, 
+                                      as.numeric(difftime(DatePOS, CD3RO_demo, units = "days")), 0),
+    
+    CD3_LATENCY_AFTER_BUFFER1 = if_else(!is.na(DatePOS) & DateCD3 > CD3POS_buffer_end1, 
+                                        as.numeric(difftime(DateCD3, CD3POS_buffer_end1, units = "days")), 0),
+    
+    CD3_LATENCY_BEFORE_INF2 = if_else(!is.na(DatePOS2) & DateCD3 > DatePOS2 & DatePOS2 > CD3RO_demo, 
+                                      as.numeric(difftime(DatePOS2, CD3RO_demo, units = "days")), 0),
+    
+    CD3_LATENCY_AFTER_BUFFER2 = if_else(!is.na(DatePOS2) & DateCD3 > CD3POS_buffer_end2, 
+                                        as.numeric(difftime(DateCD3, CD3POS_buffer_end2, units = "days")), 0),
+    
+    # Calculate the total latency for the third dose (CD3_DAY)
+    CD3_DAY = case_when(
+      # No infections, direct calculation
+      is.na(DatePOS) & is.na(DatePOS2) ~ as.numeric(difftime(DateCD3, CD3RO_d2demo, units = "days")),
+      
+      # Vaccination before any infections
+      DateCD3 <= DatePOS | DateCD3 <= DatePOS2 ~ as.numeric(difftime(DateCD3, CD3RO_d2demo, units = "days")),
+      
+      # Vaccination after infections, consider before and after buffers
+      TRUE ~ CD3_LATENCY_BEFORE_INF1 + CD3_LATENCY_AFTER_BUFFER1 + CD3_LATENCY_BEFORE_INF2 + CD3_LATENCY_AFTER_BUFFER2
+    ),
+    
+    # Additional outputs (if needed)
+    CD3_DAYNA = as.duration(interval(ymd("2021-11-11"), ymd(DateCD3)))/ddays(1),
+    CD3_DAYVP = as.duration(interval(ymd("2022-05-31"), ymd(DateCD3)))/ddays(1)
+  )
+
+
+#convert to years
+CS_LONG$CD1_DAYyr <- time_length(days(CS_LONG$CD1_DAY),unit="years")
+CS_LONG$CD3_DAYyr <- time_length(days(CS_LONG$CD3_DAY),unit="years")
+
+####### COMPUTE VARIABLE DIVIDING PP VACCINATE BEFORE AND AFTER VACCINE REQUIREMENT ######
+CS_LONG <- CS_LONG %>%
+  mutate(CD1VR = case_when (CD1_DAYVR<0 ~0, CD1_DAYVR>=0 ~1)) %>%
+  mutate(CD3VP = case_when (CD3_DAYVP<0 ~0, CD3_DAYVP>=0 ~1)) %>%
+  mutate(CD1GVR15 = case_when (CD1_DAYVR<15 ~0, CD1_DAYVR>=15 ~1)) %>%
+  mutate(CD1GVR30 = case_when (CD1_DAYVR<30 ~0, CD1_DAYVR>=30 ~1)) %>%
+  mutate(CD1GVR45 = case_when (CD1_DAYVR<45 ~0, CD1_DAYVR>=45 ~1)) %>%
+  mutate(CD1GVR60 = case_when (CD1_DAYVR<60 ~0, CD1_DAYVR>=60 ~1)) 
+
+
+####### COMPUTE VARIABLE DIVIDING ROUNDS INTO WITH AND W/O VP PERIOD ######
+#CS_LONG <- CS_LONG %>%
+#  mutate(VPPERIOD = case_when (ROUND<9 ~0, ROUND>=9 ~1))
+
+CS_LONG <- CS_LONG %>%
+  mutate(VPPERIOD = case_when (ROUND<9 ~0, ROUND>=9 ~1)) 
+
+
+
+####### COMPUTE DATE DIFFERENCE VARIABLES OF ANSWER DATE AND VACCINATION DATE #######
+CS_LONG <- CS_LONG %>% mutate(CD1_ANSDAY = as.duration(interval(ymd(ansDATE),ymd(DateCD1)))/dmonths(1))
+CS_LONG <- CS_LONG %>% mutate(CD2_ANSDAY = as.duration(interval(ymd(ansDATE),ymd(DateCD2)))/dmonths(1))
+CS_LONG <- CS_LONG %>% mutate(CD3_ANSDAY = as.duration(interval(ymd(ansDATE),ymd(DateCD3)))/dmonths(1))
+CS_LONG <- CS_LONG %>% mutate(TIME = as.duration(interval(ymd("2020-12-12"),ymd(ansDATE)))/dmonths(1))
+
+#COMBINE AECD1 AND AECD2
+CS_LONG <- CS_LONG %>% mutate(AEVAC = ifelse(AECD1 == 1 | AECD2 == 1, 1, 0))
+
+
+##REVERSE CODE VHCOLL3
+CS_LONG$VHCOLL1R <- 8 - CS_LONG$VHCOLL1
+CS_LONG$CD1_DAYyrL <- log(CS_LONG$CD1_DAYyr)
+CS_LONG$CD3_DAYyrL <- log(CS_LONG$CD3_DAYyr)
+##REVERSE ANX
+CS_LONG$HADS1R <- 3 - CS_LONG$HADS1
+CS_LONG$HADS2R <- 3 - CS_LONG$HADS2
+CS_LONG$HADS3R <- 3 - CS_LONG$HADS3
+CS_LONG$HADS6R <- 3 - CS_LONG$HADS6
+CS_LONG$HADS7R <- 3 - CS_LONG$HADS7
+
+# Recombine age groups
+CS_LONG <- CS_LONG %>%
+  mutate(AGEGP = ifelse(AGE == 69.5, 59.5, AGE))
+
+
+######### DUMMY CODE AGE VARIABLE #######
+CS_AGE <- dummy.code(CS_LONG$AGE)
+colnames(CS_AGE) <- c("AGE29", "AGE39", "AGE21", "AGE49", "AGE59", "AGE69")
+CS_LONG <- CS_LONG %>% dplyr::select(-AGE29,-AGE39,-AGE21,-AGE49,-AGE59,-AGE69)
+CS_LONG <- cbind(CS_LONG, CS_AGE)
+
+
+CS_AGEGP <- dummy.code(CS_LONG$AGEGP)
+colnames(CS_AGEGP) <- c("AGE29", "AGE39", "AGE21", "AGE49", "AGE5969")
+CS_AGEGP <- as.data.frame(CS_AGEGP)
+CS_AGEGP <- CS_AGEGP %>% dplyr::select(-AGE29,-AGE39,-AGE21,-AGE49)
+CS_LONG <- cbind(CS_LONG, CS_AGEGP)
+
+
+
+
+CS_LONG <- CS_LONG %>%
+  mutate(OLDER = ifelse(AGE69 %in% 1 | AGE59 %in% 1 | AGE49 %in% 1,1,0))
+
+CS_ROUND <- dummy.code(CS_LONG$ROUND)
+colnames(CS_ROUND) <- c("R1","R10","R11","R12","R2","R13","R3","R4","R5","R6",
+                        "R7","R8","R9")
+CS_LONG <- cbind(CS_LONG, CS_ROUND)
+
+
+
+
+##### FURTHER COMPUTATION #####
+###### ADJUSTING THE VACCINATION DATE WITH GAP TIME (4 weeks between D2 and D3)
+
+CS_LONG <- CS_LONG %>%
+  mutate(CD2_3GAP = as.duration(interval(ymd(DateCD2),ymd(DateCD3)))/dmonths(1)) %>%
+  mutate(CD2_RGAP = as.duration(interval(ymd(DateCD2),ymd(ansDATE)))/dmonths(1)) %>%
+  mutate(DateCD2VB = ymd(DateCD2) + months(3)) %>%
+  mutate(CD3_DAYyrVB = as.duration(interval(ymd(DateCD2VB),ymd(DateCD3)))/dmonths(1)) %>%
+  mutate(CD3_DAYyrVBL = log(CD3_DAYyrVB)) %>%
+  mutate(CD2_3GAPL = log(CD2_3GAP)) 
+
+
+
+
+
+
+###########################################################################
+
+
+######################## CASE FILTERING #########################
+
+###### 1.  Filter participants who did not provide any data regarding their vaccination status
+
+CS_LR8 <- CS_FULL %>% dplyr::filter(LROUND<8)
+
+CS_LONG <- CS_LONG %>% filter(!is.na(DateCD1))
+CS_FULL <- CS_FULL %>% filter(!is.na(DateCD1))
+
+
+###### 2.  Filter participants without data before their vaccination date 
+CS_CD12 <- CS_LONG %>% dplyr::select(PID, ROUND, DateCD1, ansDATE, CD1, CVAC)  
+
+CS_LONGnm <- CS_LONG %>% filter(DateCD1>ansDATE)
+CS_LONGnm3 <- CS_LONG %>% filter(DateCD3>ansDATE)
+
+
+# check number of cases retained by unique PID
+count(unique(CS_LONG$PID))
+count(unique(CS_LONGnm$PID))                            
+count(unique(CS_LONGnm3$PID))
+
+###### 3. Filter participants with no data in other studied variables (discard the rounds after the participants taken the vaccines)
+CS_LONGnm <- CS_LONGnm %>% filter(!is.na(CINT))
+CS_LONGnm3 <- CS_LONGnm3 %>% filter(!is.na(CINTd3))
+
+
+
+###### 4. Filter participants without previous round data after the vaccine rollout (a big time gap between data before and after vaccine rollout)
+CS_LONGnmVR <- CS_LONGnm %>% filter(ROUND >=7)
+CS_LONGnm3VR <- CS_LONGnm3 %>% filter(ROUND >=7)
+
+CS_CHECK <- CS_LONGnmVR %>% dplyr::select(PID, CD1_DAY, DateCD1, CD1_DAYyr, CD1_ANSDAY)
+CS_MATCHCH <- CS_MATCH %>% dplyr::select(PID, DateCD1, CD1_DAY)
+CS_LONGnmVRCHECK <- CS_LONGnm %>% filter(ROUND <7)
+
+#unique PID
+count(unique(CS_LONGnmVR$PID))
+count(unique(CS_LONGnm3VR$PID))
+
+
+
+####### 5. Filter participants claimed vaccinated before available dates (i.e., negative CD1_DAY or CD3_DAY)
+
+
+CS_LONGnmcheck <- CS_LONGnm %>% filter(CD1_DAYyr<0)
+CS_LONGnmVR <- CS_LONGnmVR %>% filter(CD1_DAYyr>0) %>% filter(CD1_DAY>0)
+CS_LONGnm3VR <- CS_LONGnm3VR %>% filter(CD3_DAYyr>0) %>% filter(CD3_DAY>0)
+
+
+###### OPTIONAL.  Filter participants vaccinated after the implementation of the vaccine pass (for sensitivity analysis only)
+CS_LONGnmVR <- CS_LONGnmVR %>% filter(CD1_DAYVP<0)
+CS_LONGnm3VR <- CS_LONGnm3VR %>% filter(CD3_DAYVP<0)
+
+# check number of cases retained by unique PID
+count(unique(CS_LONGnmVR$PID))                            
+count(unique(CS_LONGnm3VR$PID))
+
+
+
+
+
+
+########## EXTRACT DATA NEAREST TO VACCINATION ############
+CS_NEARVAC <- CS_LONGnmVR %>%
+  group_by(PID) %>%
+  slice_min(CD1_ANSDAY, n = 1)
+
+CS_NEARVAC <- CS_LONGnmVR %>%
+  group_by(PID) %>%
+  slice_max(CD1_ANSDAY, n = 1)
+
+CS_NEAR3VAC <- CS_LONGnm3VR %>%
+  group_by(PID) %>%
+  slice_min(CD3_ANSDAY, n = 1)
+
+CS_NEAR3VAC <- CS_LONGnm3VR %>%
+  group_by(PID) %>%
+  slice_max(CD3_ANSDAY, n = 1)
+
+
+
+
+######### EXTRACT DATA AT ROUND 7 OR NEAR ROUND 7 ##########
+library(dplyr)
+
+# Function to select the closest available round data, prioritizing Round 7
+get_closest_round_data <- function(data, target_round) {
+  # Calculate the absolute difference from the target round for each row
+  data <- data %>% mutate(diff = abs(ROUND - target_round))
+  
+  # Group by participant and select the row with the minimum difference
+  closest_data <- data %>%
+    group_by(PID) %>%
+    arrange(diff) %>%
+    slice(1) %>%
+    ungroup() %>%
+    dplyr::select(-diff)
+  
+  return(closest_data)
+}
+
+# Apply function to your data
+CS_NEARVAC_hello <- get_closest_round_data(CS_LONGnmVR, 7)
+CS_NEAR3VAC_closest_round <- get_closest_round_data(CS_NEAR3VAC, 7)
+
+
+
+
+
+
+###### INCORPORATE NEAR-NEAR TERM (FIRST DOSE) ########
+
+CS_NFVAC <- rbind(CS_NEARVAC, CS_NEARVAC)
+
+CS_NFVAC <- CS_NFVAC %>%
+  group_by(PID) %>%
+  filter(!(min(CD1_ANSDAY) == max(CD1_ANSDAY)))
+
+CS_NFVAC <- CS_NFVAC %>%
+  dplyr::arrange(PID, ROUND) %>%
+  dplyr::group_by(PID) %>%
+  dplyr::mutate(CONF_d = CONFIDENCE - dplyr::lag(CONFIDENCE)) %>%
+  dplyr::mutate(COMP_d = COMPLACENCY - dplyr::lag(COMPLACENCY)) %>%
+  dplyr::mutate(CONS_d = CONSTRAINT - dplyr::lag(CONSTRAINT)) %>%
+  dplyr::mutate(CALC_d = CALCULATION - dplyr::lag(CALCULATION)) %>%
+  dplyr::mutate(COLL_d = COLLECTIVE - dplyr::lag(COLLECTIVE)) %>%
+  dplyr::mutate(TRUST_d = GOVTRUST - dplyr::lag(GOVTRUST)) %>%
+  dplyr::mutate(CINT_d = CINT - dplyr::lag(CINTd3)) %>%
+  dplyr::mutate(ROUND_d = ROUND - dplyr::lag(ROUND)) %>%
+  dplyr::ungroup() 
+
+CS_NFVAC <- CS_NFVAC %>%
+  filter(ROUND_d > 0)
+CS_CHECKNF <- CS_NFVAC %>% dplyr::select(PID,ROUND,CONFIDENCE,CONF_d) 
+
+
+
+
+###### INCORPORATE NEAR-NEAR TERM (THIRD DOSE) ########
+
+CS_NF3VAC <- rbind(CS_NEAR3VAC, CS_NEAR3VAC)
+
+CS_NF3VAC <- CS_NF3VAC %>%
+  group_by(PID) %>%
+  filter(!(min(CD3_ANSDAY) == max(CD3_ANSDAY)))
+
+CS_NF3VAC <- CS_NF3VAC %>%
+  dplyr::arrange(PID, ROUND) %>%
+  dplyr::group_by(PID) %>%
+  dplyr::mutate(CONF_d = CONFIDENCE - dplyr::lag(CONFIDENCE)) %>%
+  dplyr::mutate(COMP_d = COMPLACENCY - dplyr::lag(COMPLACENCY)) %>%
+  dplyr::mutate(CONS_d = CONSTRAINT - dplyr::lag(CONSTRAINT)) %>%
+  dplyr::mutate(CALC_d = CALCULATION - dplyr::lag(CALCULATION)) %>%
+  dplyr::mutate(COLL_d = COLLECTIVE - dplyr::lag(COLLECTIVE)) %>%
+  dplyr::mutate(TRUST_d = GOVTRUST - dplyr::lag(GOVTRUST)) %>%
+  dplyr::mutate(CINTd3_d = CINTd3 - dplyr::lag(CINTd3)) %>%
+  dplyr::mutate(ROUND_d = ROUND - dplyr::lag(ROUND)) %>%
+  dplyr::ungroup() 
+
+CS_NF3VAC <- CS_NF3VAC %>%
+  filter(ROUND_d > 0)
+CS_CHECKNF3 <- CS_NF3VAC %>% dplyr::select(PID,ROUND,CONFIDENCE,CONF_d) 
+
+
+
+##### CALCUALTE MEAN OF THE NEAREST AND SECOND NEAREST POINTS OF DATA #####
+# Define function to calculate the average
+avg_func <- function(column, count) {
+  ifelse(count == 1, column, mean(c(column, dplyr::lag(column)), na.rm = TRUE))
+}
+
+### first dose
+# List of variables
+vars <- c("CCONF_govinfo", "CCONF_govmeas", "CCONF_govable", "CCONF_govdec", "CCONF_govgen", 
+          "VHCONF1", "VHCONF2", "VHCONF3", "VHCOMP1", "VHCOMP2", "VHCOMP3", "VHCALC1", 
+          "VHCALC2", "VHCALC3", "VHCOLL2", "VHCOLL3", "VHCONS1", "VHCONS2", "VHCONS3",
+          "CINT", "CINTd3")
+
+# Apply function to each variable
+CS_NEARVAC2R <- CS_LONGnmVR %>%
+  dplyr::group_by(PID) %>%
+  dplyr::slice_min(CD1_ANSDAY, n = 2) %>%
+  dplyr::arrange(PID, CD1_ANSDAY) %>%
+  dplyr::add_count(PID, name = "count") %>%
+  dplyr::mutate(across(all_of(vars), ~avg_func(., count), .names = "AVG_{.col}")) %>%
+  dplyr::select(-count) # remove the count column
+
+CS_NEARVAC2R <- CS_NEARVAC2R %>%
+  group_by(PID) %>%
+  slice_min(CD1_ANSDAY, n = 1) 
+
+### third dose
+CS_NEAR3VAC2R <- CS_LONGnm3VR %>%
+  dplyr::group_by(PID) %>%
+  dplyr::slice_min(CD3_ANSDAY, n = 2) %>%
+  dplyr::arrange(PID, CD3_ANSDAY) %>%
+  dplyr::add_count(PID, name = "count") %>%
+  dplyr::mutate(across(all_of(vars), ~avg_func(., count), .names = "AVG_{.col}")) %>%
+  dplyr::select(-count) # remove the count column
+
+CS_NEAR3VAC2R <- CS_NEAR3VAC2R %>%
+  group_by(PID) %>%
+  slice_min(CD3_ANSDAY, n = 1) 
+
+
+### FOR ANALYSIS USING DATA AFTER VACCINE PASS ###
+###### 4.  Filter participants vaccinated after the implementation of the vaccine pass
+CS_LONGnmAVR <- CS_LONGnm %>% filter(CD1_DAYVP>0)
+CS_LONGnm3AVR <- CS_LONGnm3 %>% filter(CD3_DAYVP>0)
+
+###### 5. Filter participants without data after the vaccine rollout (a big time gap between data before and after vaccine rollout)
+CS_LONGnmAVR <- CS_LONGnmAVR %>% filter(ROUND >=7)
+CS_LONGnm3AVR <- CS_LONGnm3AVR %>% filter(ROUND >=7)
+CS_CHECK <- CS_LONGnmAVR %>% dplyr::select(PID, CD1_DAY, DateCD1, CD1_DAYyr, CD1_ANSDAY)
+CS_MATCHCH <- CS_MATCH %>% dplyr::select(PID, DateCD1, CD1_DAY)
+CS_LONGnmAVRCHECK <- CS_LONGnm %>% filter(ROUND <7)
+
+#unique PID
+count(unique(CS_LONGnmAVR$PID))
+count(unique(CS_LONGnm3AVR$PID))
+
+
+
+########## EXTRACT DATA NEAREST TO VACCINATION ############
+CS_NEARVACavr <- CS_LONGnmAVR %>%
+  group_by(PID) %>%
+  slice_min(CD1_ANSDAY, n = 1)
+
+CS_NEARVACavr <- CS_LONGnmAVR %>%
+  group_by(PID) %>%
+  slice_max(CD1_ANSDAY, n = 1)
+
+CS_NEAR3VACavr <- CS_LONGnm3AVR %>%
+  group_by(PID) %>%
+  slice_min(CD3_ANSDAY, n = 1)
+
+CS_NEAR3VACavr <- CS_LONGnm3AVR %>%
+  group_by(PID) %>%
+  slice_max(CD3_ANSDAY, n = 1)
+
+
+
+
+## FOR ANALYSIS USING ALL DATA ####
+###### 4.  Filter participants vaccinated after the implementation of the vaccine pass
+
+
+###### 5. Filter participants without data after the vaccine rollout (a big time gap between data before and after vaccine rollout)
+CS_LONGnmALL <- CS_LONGnm %>% filter(ROUND >=7)
+CS_LONGnm3ALL <- CS_LONGnm3 %>% filter(ROUND >=7)
+
+
+#unique PID
+count(unique(CS_LONGnmALL$PID))
+count(unique(CS_LONGnm3ALL$PID))
+
+
+####### 6. Filter participants claimed vaccinated before available dates (i.e., negative CD1_DAY or CD3_DAY) (for sensitivity analysis only)
+
+CS_LONGnmALL <- CS_LONGnmALL %>% filter(CD1_DAYyr>0) %>% filter(CD1_DAY>0)
+CS_LONGnm3ALL <- CS_LONGnm3ALL %>% filter(CD3_DAYyr>0) %>% filter(CD3_DAY>0)
+
+########## EXTRACT DATA NEAREST TO VACCINATION ############
+CS_NEARVACall <- CS_LONGnmALL %>%
+  group_by(PID) %>%
+  slice_min(CD1_ANSDAY, n = 1)
+
+
+CS_NEAR3VACall <- CS_LONGnm3ALL %>%
+  group_by(PID) %>%
+  slice_min(CD3_ANSDAY, n = 1)
+
+
+
+### COMPUTE VARIABLE INDICATING BEFORE AND AFTER VACCINE MANDATES
+CS_NEARVACall$before_VR <- ifelse(CS_NEARVACall$DateCD1 < as.Date("2021-09-01"), "Before VR", "After VR")
+CS_NEARVACall$before_VP <- ifelse(CS_NEARVACall$DateCD1 < as.Date("2022-02-24"), "Before VP", "After VP")
+CS_NEARVACall$before_VPan <- ifelse(CS_NEARVACall$DateCD1 < as.Date("2022-02-17"), "Before VPan", "After VPan")
+
+CS_NEAR3VACall$before_VP <- ifelse(CS_NEAR3VACall$DateCD3 < as.Date("2022-05-31"), "Before VP", "After VP")
+CS_NEAR3VACall$before_VPan <- ifelse(CS_NEAR3VACall$DateCD3 < as.Date("2022-03-20"), "Before VPan", "After VPan")
+
+
+############################### SURVIVAL ANALYSIS ##################################
+library(survival)
+# Assuming the start date is 2022-01-01 for all individuals
+#start_date <- as.Date("2022-01-01")
+#CS_NEARVACall$duration <- as.numeric(difftime(CS_NEARVACall$DateCD1, start_date, units = "days"))
+
+# Create a 'Survival' object
+# Assuming everyone in the dataset got vaccinated, so event=1 for all
+
+######## FIRST DOSE ########
+CS_NEARVACall$before_VR <- as.factor(CS_NEARVACall$before_VR)
+CS_NEARVACall$before_VP <- as.factor(CS_NEARVACall$before_VP)
+
+
+
+CS_NEARVACall$surv_obj <- with(CS_NEARVACall, Surv(CD1_DAY, rep(1, nrow(CS_NEARVACall))))
+
+
+
+km_fit <- survfit(surv_obj ~ 1, data = CS_NEARVACall)
+plot(km_fit, main="Kaplan-Meier Estimate of Vaccination Delay", xlab="Days", ylab="Probability of Not Being Vaccinated")
+
+
+cox_fit <- coxph(surv_obj ~ GOVTRUST + CONFIDENCE + COMPLACENCY + COLLECTIVE + CALCULATION + CONSTRAINT + CINT, data = CS_NEARVACall)
+summary(cox_fit)
+
+
+# w/o time covariates (CURRENTLY USING; remove ROUND for sensitivity analysis using the no-post-VP data)
+cox_fit <- coxph(surv_obj ~ GOVTRUST + CONFIDENCE + COMPLACENCY + COLLECTIVE + CALCULATION + CONSTRAINT + CINT + ROUND +AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN, data = CS_NEARVACall)
+summary(cox_fit)
+
+km_fit <- survfit(surv_obj ~ 1, data = CS_NEARVACall)
+plot(km_fit, main="Kaplan-Meier Estimate of Vaccination Delay", xlab="Days", ylab="Probability of Not Being Vaccinated")
+
+# Add vertical lines for VR and VP dates
+abline(v = as.numeric(difftime(as.Date("2021-09-01"), CS_NEARVACall$CD1RO_demo[1], units = "days")), col="blue", lty=2)
+abline(v = as.numeric(difftime(as.Date("2022-02-24"), CS_NEARVACall$CD1RO_demo[1], units = "days")), col="red", lty=2)
+
+legend("topright", legend=c("Vaccination requirement", "Vaccine pass"), col=c("blue", "red"), lty=2)
+
+# Perform log-rank tests
+logrank_test_VR <- survdiff(surv_obj ~ before_VR, data = CS_NEARVACall)
+logrank_test_VP <- survdiff(surv_obj ~ before_VP, data = CS_NEARVACall)
+
+# Print the results of the log-rank tests
+print(logrank_test_VR)
+print(logrank_test_VP)
+
+km_fit_VR <- survfit(surv_obj ~ before_VR, data = CS_NEARVACall)
+km_fit_VP <- survfit(surv_obj ~ before_VP, data = CS_NEARVACall)                    
+
+
+
+
+####### CALCUALTE MEAN DAYS TO VACCINE PASS/ REQUIREMENT
+
+# Convert the earliest vaccine date to Date format if it's not already
+CS_NEARVACall$EarliestVaccineDate <- as.Date(CS_NEARVACall$CD1RO_demo)
+
+# Calculate the number of days from the earliest vaccine date to VR and VP implementation for each participant
+CS_NEARVACall$DaysToVR <- as.numeric(difftime(as.Date("2021-09-01"), CS_NEARVACall$EarliestVaccineDate, units = "days"))
+CS_NEARVACall$DaysToVP <- as.numeric(difftime(as.Date("2022-02-24"), CS_NEARVACall$EarliestVaccineDate, units = "days"))
+
+# Compute the mean of these durations
+meanDaysToVR <- mean(CS_NEARVACall$DaysToVR)
+meanDaysToVP <- mean(CS_NEARVACall$DaysToVP)
+
+# Plotting the Kaplan-Meier curve
+plot(km_fit, main="Kaplan-Meier Estimate of Vaccination Delay", xlab="Days", ylab="Probability of Not Being Vaccinated")
+abline(v = meanDaysToVR, col="blue", lty=2)
+abline(v = meanDaysToVP, col="red", lty=2)
+legend("topright", legend=c("Mean days to Vaccination requirement", "Mean days to Vaccine pass"), col=c("blue", "red"), lty=2)
+
+
+
+######### CALCULATE THE RANGE DAYS TO VR/VP 
+
+# Calculate the number of days from the earliest vaccine date to VR and VP implementation for each participant
+CS_NEARVACall$DaysToVR <- as.numeric(difftime(as.Date("2021-09-01"), CS_NEARVACall$EarliestVaccineDate, units = "days"))
+CS_NEARVACall$DaysToVP <- as.numeric(difftime(as.Date("2022-02-24"), CS_NEARVACall$EarliestVaccineDate, units = "days"))
+
+# Compute the range (min and max) of these durations for VR and VP
+rangeDaysToVR <- range(CS_NEARVACall$DaysToVR, na.rm = TRUE)
+rangeDaysToVP <- range(CS_NEARVACall$DaysToVP, na.rm = TRUE)
+
+# Plotting the Kaplan-Meier curve
+plot(km_fit, main="Kaplan-Meier Estimate of Vaccination Delay", xlab="Days", ylab="Probability of Not Being Vaccinated")
+
+# Add lines for the range of VR and VP dates
+abline(v = rangeDaysToVR, col="blue", lty=2)
+abline(v = rangeDaysToVP, col="red", lty=2)
+
+# Adding a legend to the plot
+legend("topright", legend=c("Range of days to Vaccination requirement", "Range of days to Vaccine pass"), col=c("blue", "red"), lty=2, cex=0.8)
+
+
+
+
+# Plotting the Kaplan-Meier curve
+plot(km_fit, main="Kaplan-Meier Estimate of Vaccination Delay", xlab="Days", ylab="Probability of not being vaccinated of the 1st dose")
+abline(v = meanDaysToVR, col="blue", lty=2)
+abline(v = meanDaysToVP, col="red", lty=2)
+abline(v = meanDaysToAnnouncement, col="green", lty=2)
+
+# Calculate the survival probability at 100 days
+surv_prob_at_100 <- summary(km_fit, times = 100)$surv[1]
+
+# Add a horizontal line at the survival probability at 100 days in grey
+abline(h = surv_prob_at_100, col="grey", lty=2)
+
+# Text for the box
+percentage_label <- paste(round(surv_prob_at_100 * 100, 2), "% not vaccinated\nat 100 days")
+
+# Coordinates for the box and text
+x_coord <- 225
+y_coord <- surv_prob_at_100 - 0.05 # Adjusted for better visibility
+box_width <- 0.15 * diff(par("usr")[1:2]) # Adjusted width
+box_height <- 0.04 * diff(par("usr")[3:4]) # Adjusted height
+
+# Draw a box for the text
+rect(xleft = x_coord - box_width, xright = x_coord + box_width, ybottom = y_coord - box_height, ytop = y_coord + box_height, col = "white", border = "black")
+
+# Add the text inside the box
+text(x = x_coord, y = y_coord, labels = percentage_label, cex = 0.7, adj = c(0.5, 0.5))
+
+# Adding a legend to the plot
+legend("topright", legend=c("Vaccination requirement", "Vaccine pass", "Announcement of vaccine pass"), col=c("blue", "red", "green"), lty=2, cex=0.8)
+
+
+
+
+
+### ONLY ONE LINE
+km_fit <- survfit(surv_obj ~ 1, data = CS_NEARVACall)
+
+# Plot the Kaplan-Meier curve without adding any color first
+plot(km_fit, col=NA, main="Kaplan-Meier Estimate with VR Date Highlighted", xlab="Days", ylab="Probability of Not Being Vaccinated")
+
+# Get the time points and survival probabilities from the km_fit object
+times <- km_fit$time
+surv_probs <- km_fit$surv
+
+# Find the index of the VR date in the times vector
+vr_index <- which.min(abs(times - as.numeric(difftime(as.Date("2021-09-01"), CS_NEARVACall$CD1RO_demo[1], units = "days"))))
+
+# Add color to the segments before and after the VR date
+lines(times[1:vr_index], surv_probs[1:vr_index], col="blue", lwd=2)
+lines(times[(vr_index-1):length(times)], surv_probs[(vr_index-1):length(surv_probs)], col="red", lwd=2)
+
+# Add a legend
+legend("topright", legend=c("Before VR", "After VR"), col=c("blue", "red"), lty=1, lwd=2)
+
+
+
+
+
+# Plot the Kaplan-Meier curve without adding any color first
+plot(km_fit, col=NA, main="Kaplan-Meier Estimate with VP Date Highlighted", xlab="Days", ylab="Probability of Not Being Vaccinated")
+
+# Get the time points and survival probabilities from the km_fit object
+times <- km_fit$time
+surv_probs <- km_fit$surv
+
+# Find the index of the VP date in the times vector
+vp_index <- which.min(abs(times - as.numeric(difftime(as.Date("2022-02-24"), CS_NEARVACall$CD1RO_demo[1], units = "days"))))
+
+# Add color to the segments before and after the VP date
+lines(times[1:vp_index], surv_probs[1:vp_index], col="green", lwd=2)
+lines(times[(vp_index-1):length(times)], surv_probs[(vp_index-1):length(surv_probs)], col="purple", lwd=2)
+
+# Add a legend
+legend("topright", legend=c("Before VP", "After VP"), col=c("green", "purple"), lty=1, lwd=2)
+
+
+
+
+
+
+
+######### THIRD DOSE ##########
+CS_NEAR3VACall$before_VP <- as.factor(CS_NEAR3VACall$before_VP)
+
+
+CS_NEAR3VACall$surv_obj <- with(CS_NEAR3VACall, Surv(CD3_DAY, rep(1, nrow(CS_NEAR3VACall))))
+CS_NEAR3VAC$surv_obj <- with(CS_NEAR3VAC, Surv(CD3_DAY, rep(1, nrow(CS_NEAR3VAC)))) # for sensitivity analysis only, without pre mandate data
+
+km_fit <- survfit(surv_obj ~ 1, data = CS_NEAR3VACall)
+plot(km_fit, main="Kaplan-Meier Estimate of Vaccination Delay", xlab="Days", ylab="Probability of Not Being Vaccinated")
+
+
+cox_fit <- coxph(surv_obj ~ GOVTRUST + CONFIDENCE + COMPLACENCY + COLLECTIVE + CALCULATION + CONSTRAINT + CINTd3, data = CS_NEAR3VACall)
+summary(cox_fit)
+
+
+
+## EXAMINE ALSO THE IMPORTANCE OF THE VACCINE REQUIREMENT AND PASS (Currently using, remove ROUND for sensitivity analysis)
+cox_fit <- coxph(surv_obj ~ GOVTRUST + CONFIDENCE + COMPLACENCY + COLLECTIVE + CALCULATION + CONSTRAINT + CINTd3 + before_VP +AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC, data = CS_NEAR3VACall)
+summary(cox_fit)
+
+
+
+# w/o time covariates (CURRENTLY USING; remove ROUND for sensitivity analysis using the no-post-VP data)
+
+
+cox_fit <- coxph(surv_obj ~ GOVTRUST + CONFIDENCE + COMPLACENCY + COLLECTIVE + CALCULATION + CONSTRAINT + CINTd3 + AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC, data = CS_NEAR3VAC) # for sensitivity analysis only, without pre mandate data
+summary(cox_fit)
+
+km_fit <- survfit(surv_obj ~ 1, data = CS_NEAR3VACall)
+plot(km_fit, main="Kaplan-Meier Estimate of Vaccination Delay", xlab="Days", ylab="Probability of Not Being Vaccinated")
+
+# Add vertical lines for VR and VP dates
+abline(v = as.numeric(difftime(as.Date("2022-05-31"), CS_NEAR3VACall$CD3RO_demo[1], units = "days")), col="red", lty=2)
+
+legend("topright", legend=c("Vaccine pass"), col=c("red"), lty=2)
+
+# Perform log-rank tests
+
+logrank_test_VPan <- survdiff(surv_obj ~ before_VPan, data = CS_NEAR3VACall)
+
+
+# Print the results of the log-rank tests
+
+print(logrank_test_VP)
+print(logrank_test_VPan)
+
+
+km_fit_VP <- survfit(surv_obj ~ before_VP, data = CS_NEAR3VACall)                    
+
+
+####### ADD ANNOUNCEMENT DATE (USE IN MANUSCRIPT)
+# Convert the earliest vaccine date to Date format if it's not already
+CS_NEAR3VACall$EarliestVaccineDate <- as.Date(CS_NEAR3VACall$CD3RO_demo)
+
+# Calculate the number of days from the earliest vaccine date to VP implementation and announcement dates for each participant
+CS_NEAR3VACall$DaysToVP <- as.numeric(difftime(as.Date("2022-05-31"), CS_NEAR3VACall$EarliestVaccineDate, units = "days"))
+CS_NEAR3VACall$DaysToAnnouncement <- as.numeric(difftime(as.Date("2022-03-20"), CS_NEAR3VACall$EarliestVaccineDate, units = "days"))
+
+# Compute the mean of these durations
+meanDaysToVP <- mean(CS_NEAR3VACall$DaysToVP, na.rm = TRUE)
+meanDaysToAnnouncement <- mean(CS_NEAR3VACall$DaysToAnnouncement, na.rm = TRUE)
+
+# Plotting the Kaplan-Meier curve
+plot(km_fit, main="Kaplan-Meier Estimate of Vaccination Delay", xlab="Days", ylab="Probability of not being vaccinated of the booster")
+abline(v = meanDaysToVP, col="red", lty=2)
+abline(v = meanDaysToAnnouncement, col="green", lty=2)
+
+# Calculate the survival probability at 100 days
+surv_prob_at_100 <- summary(km_fit, times = 100)$surv[1]
+
+# Add a horizontal line at the survival probability at 100 days in grey
+abline(h = surv_prob_at_100, col="grey", lty=2)
+
+# Text for the box
+percentage_label <- paste(round(surv_prob_at_100 * 100, 2), "% not vaccinated\nat 100 days")
+
+# Coordinates for the box and text
+x_coord <- 210
+y_coord <- surv_prob_at_100 + 0.05 # Adjusted for better visibility
+box_width <- 0.15 * diff(par("usr")[1:2]) # Adjusted width
+box_height <- 0.04 * diff(par("usr")[3:4]) # Adjusted height
+
+# Draw a box for the text
+rect(xleft = x_coord - box_width, xright = x_coord + box_width, ybottom = y_coord - box_height, ytop = y_coord + box_height, col = "white", border = "black")
+
+# Add the text inside the box
+text(x = x_coord, y = y_coord, labels = percentage_label, cex = 0.7, adj = c(0.5, 0.5))
+
+# Adding a legend to the plot
+legend("topright", legend=c("Adjustment of vaccine pass", "Announcement of adjustment of vaccine pass"), col=c("red", "green"), lty=2, cex=0.8)
+
+
+
+
+
+plot(km_fit_VR, col=c("blue", "red"), main="Kaplan-Meier Curves Stratified by VR Date", xlab="Days", ylab="Probability of Not Being Vaccinated")
+legend("topright", legend=levels(CS_NEAR3VACall$before_VR), col=c("blue", "red"), lty=1)
+
+plot(km_fit_VP, col=c("green", "purple"), main="Kaplan-Meier Curves Stratified by VP Date", xlab="Days", ylab="Probability of Not Being Vaccinated")
+legend("topright", legend=levels(CS_NEAR3VACall$before_VP), col=c("green", "purple"), lty=1)
+
+
+
+
+
+### ONLY ONE LINE
+km_fit <- survfit(surv_obj ~ 1, data = CS_NEAR3VACall)
+
+# Plot the Kaplan-Meier curve without adding any color first
+plot(km_fit, col=NA, main="Kaplan-Meier Estimate with VR Date Highlighted", xlab="Days", ylab="Probability of Not Being Vaccinated")
+
+# Get the time points and survival probabilities from the km_fit object
+times <- km_fit$time
+surv_probs <- km_fit$surv
+
+# Find the index of the VR date in the times vector
+vr_index <- which.min(abs(times - as.numeric(difftime(as.Date("2021-09-01"), CS_NEAR3VACall$CD3RO_demo[1], units = "days"))))
+
+# Add color to the segments before and after the VR date
+lines(times[1:vr_index], surv_probs[1:vr_index], col="blue", lwd=2)
+lines(times[(vr_index-1):length(times)], surv_probs[(vr_index-1):length(surv_probs)], col="red", lwd=2)
+
+# Add a legend
+legend("topright", legend=c("Before VR", "After VR"), col=c("blue", "red"), lty=1, lwd=2)
+
+
+
+
+
+# Plot the Kaplan-Meier curve without adding any color first
+plot(km_fit, col=NA, main="Kaplan-Meier Estimate with VP Date Highlighted", xlab="Days", ylab="Probability of Not Being Vaccinated")
+
+# Get the time points and survival probabilities from the km_fit object
+times <- km_fit$time
+surv_probs <- km_fit$surv
+
+# Find the index of the VP date in the times vector
+vp_index <- which.min(abs(times - as.numeric(difftime(as.Date("2022-02-24"), CS_NEAR3VACall$CD3RO_demo[1], units = "days"))))
+
+# Add color to the segments before and after the VP date
+lines(times[1:vp_index], surv_probs[1:vp_index], col="green", lwd=2)
+lines(times[(vp_index-1):length(times)], surv_probs[(vp_index-1):length(surv_probs)], col="purple", lwd=2)
+
+# Add a legend
+legend("topright", legend=c("Before VP", "After VP"), col=c("green", "purple"), lty=1, lwd=2)
+
+
+
+
+######################## SEM #########################
+### USING ONLY THE NEAREST DATA
+sem_modelN <- '
+#MEASUREMENT MODEL
+TRUST =~ CCONF_govinfo + CCONF_govmeas + CCONF_govable + CCONF_govdec + CCONF_govgen
+CONF =~ VHCONF1 + VHCONF2 + VHCONF3
+COMP =~ VHCOMP1 + VHCOMP2 + VHCOMP3
+CALC =~ VHCALC1 + VHCALC2 + VHCALC3
+COLL =~ VHCOLL2 + VHCOLL3
+CONS =~ VHCONS1 + VHCONS2 + VHCONS3
+
+#INT =~ CINTd3
+#INT =~ CINT
+#LAT =~ CD2_3GAPL
+#LAT =~ CD1_DAYyr
+#D1 =~ CD1_DAYyrL
+
+#STRUCTURAL MODEL
+CD1_DAYyr ~ CINT + TRUST + CONF + COMP + COLL + CALC + CONS 
+CINT ~ CONF + COMP + COLL + CALC + CONS + TRUST 
+CONF + COMP + COLL + CALC + CONS ~ TRUST
+
+#COVARIANCE
+COMP ~~ CONF + CALC + COLL + CONS
+CONF ~~ CALC + COLL + CONS
+CALC ~~ COLL + CONS
+COLL ~~ CONS
+
+CONF ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND
+COMP ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND
+COLL ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND
+CALC ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND
+CONS ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND
+CINT ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND
+CD1_DAYyr ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND
+'
+
+
+CS_SEM <- sem(model = sem_modelN, data = CS_NEARVACall, missing = "fiml", fixed.x = F)
+summary(CS_SEM, fit.measures = TRUE, standardized = TRUE)
+modificationindices(CS_SEM, sort. = T)
+semPaths(CS_SEM, layout = "tree2", rotation = 2, structural = TRUE)
+
+
+### USING ONLY THE NEAREST DATA (ALL DATA WITH BEOFRE_VP) (CURRENTLY USING, remove ROUND for sensitivity analysis)
+# Convert 'before_VP' to an ordered factor
+CS_NEARVACall$before_VP <- as.factor(CS_NEARVACall$before_VP)
+
+sem_modelN <- '
+#MEASUREMENT MODEL
+TRUST =~ CCONF_govinfo + CCONF_govmeas + CCONF_govable + CCONF_govdec + CCONF_govgen
+CONF =~ VHCONF1 + VHCONF2 + VHCONF3
+COMP =~ VHCOMP1 + VHCOMP2 + VHCOMP3
+CALC =~ VHCALC1 + VHCALC2 + VHCALC3
+COLL =~ VHCOLL2 + VHCOLL3
+CONS =~ VHCONS1 + VHCONS2 + VHCONS3
+
+#INT =~ CINTd3
+#INT =~ CINT
+#LAT =~ CD2_3GAPL
+#LAT =~ CD1_DAYyr
+#D1 =~ CD1_DAYyrL
+
+#STRUCTURAL MODEL
+CD1_DAYyr ~ CINT + TRUST + CONF + COMP + COLL + CALC + CONS 
+CINT ~ CONF + COMP + COLL + CALC + CONS + TRUST 
+CONF + COMP + COLL + CALC + CONS ~ TRUST
+
+#COVARIANCE
+COMP ~~ CONF + CALC + COLL + CONS
+CONF ~~ CALC + COLL + CONS
+CALC ~~ COLL + CONS
+COLL ~~ CONS
+
+CONF ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+COMP ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+COLL ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+CALC ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+CONS ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+CINT ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+CD1_DAYyr ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP #converted outcomes from day to year)
+'
+
+
+CS_SEM <- sem(model = sem_modelN, data = CS_NEARVACall, missing = "fiml", fixed.x = F)
+summary(CS_SEM, fit.measures = TRUE, standardized = TRUE)
+modificationindices(CS_SEM, sort. = T)
+semPaths(CS_SEM, layout = "tree2", rotation = 2, structural = TRUE)
+
+
+
+##### Mixture model with clustering (CURRENTLY USING, remove ROUND for sensitivity analysis)
+library(mclust)
+
+# Fit a mixture model to the first dose latency data
+first_dose_mixture <- Mclust(CS_NEARVACall$CD1_DAYyr, G = 2)
+
+# Summary of the mixture model
+summary(first_dose_mixture)
+
+# Add the mixture components to your dataset
+CS_NEARVACall$CD1_DAYyr_cluster <- first_dose_mixture$classification
+#CS_NEARVACall$before_VP <- as.numeric(as.character(CS_NEARVACall$before_VP))
+library(lavaan)
+
+sem_modelN <- '
+#MEASUREMENT MODEL
+TRUST =~ CCONF_govinfo + CCONF_govmeas + CCONF_govable + CCONF_govdec + CCONF_govgen
+CONF =~ VHCONF1 + VHCONF2 + VHCONF3
+COMP =~ VHCOMP1 + VHCOMP2 + VHCOMP3
+CALC =~ VHCALC1 + VHCALC2 + VHCALC3
+COLL =~ VHCOLL2 + VHCOLL3
+CONS =~ VHCONS1 + VHCONS2 + VHCONS3
+
+#STRUCTURAL MODEL
+CD1_DAYyr ~ CINT + TRUST + CONF + COMP + COLL + CALC + CONS + CD1_DAYyr_cluster
+CINT ~ CONF + COMP + COLL + CALC + CONS + TRUST 
+CONF + COMP + COLL + CALC + CONS ~ TRUST
+
+#COVARIANCE
+COMP ~~ CONF + CALC + COLL + CONS
+CONF ~~ CALC + COLL + CONS
+CALC ~~ COLL + CONS
+COLL ~~ CONS
+
+CONF ~ AGE29 + AGE39 + AGE49 + AGE59 + AGE69 + WOMEN +  ROUND
+COMP ~ AGE29 + AGE39 + AGE49 + AGE59 + AGE69 + WOMEN +  ROUND
+COLL ~ AGE29 + AGE39 + AGE49 + AGE59 + AGE69 + WOMEN +  ROUND
+CALC ~ AGE29 + AGE39 + AGE49 + AGE59 + AGE69 + WOMEN +  ROUND
+CONS ~ AGE29 + AGE39 + AGE49 + AGE59 + AGE69 + WOMEN +  ROUND
+CINT ~ AGE29 + AGE39 + AGE49 + AGE59 + AGE69 + WOMEN +  ROUND
+CD1_DAYyr ~ AGE29 + AGE39 + AGE49 + AGE59 + AGE69 + WOMEN +  ROUND
+'
+
+CS_SEM <- sem(model = sem_modelN, data = CS_NEARVACall, missing = "fiml", fixed.x = FALSE)
+summary(CS_SEM, fit.measures = TRUE, standardized = TRUE)
+modificationindices(CS_SEM, sort. = TRUE)
+semPaths(CS_SEM, layout = "tree2", rotation = 2, structural = TRUE)
+
+
+
+
+
+### USING ONLY THE NEAREST DATA (for 3rd dose) (ALL DATA WITH BEOFRE_VP) (CURRENTLY USING)
+library(MASS)
+
+boxcox_transformation <- boxcox(CS_NEAR3VACall$CD3_DAYyr ~ 1, lambda = seq(-2, 2, by = 0.1))
+plot(boxcox_transformation)
+# Log-transform the outcome variable
+CS_NEAR3VACall$sqrt_CD3_DAYyr <- sqrt(CS_NEAR3VACall$CD3_DAYyr)  # Adding 1 to avoid log(0)
+#CS_NEAR3VACall$before_VP <- as.numeric(CS_NEAR3VACall$before_VP)
+#CS_NEAR3VACall$before_VP <- factor(CS_NEAR3VACall$before_VP, ordered = TRUE)
+
+sem_modelN <- '
+#MEASUREMENT MODEL
+TRUST =~ CCONF_govinfo + CCONF_govmeas + CCONF_govable + CCONF_govdec + CCONF_govgen
+CONF =~ VHCONF1 + VHCONF2 + VHCONF3
+COMP =~ VHCOMP1 + VHCOMP2 + VHCOMP3
+CALC =~ VHCALC1 + VHCALC2 + VHCALC3
+COLL =~ VHCOLL2 + VHCOLL3
+CONS =~ VHCONS1 + VHCONS2 + VHCONS3
+                                                                                                                     
+#INT =~ CINTd3
+#INT =~ CINT
+#LAT =~ CD2_3GAPL
+#LAT =~ CD1_DAYyr
+#D1 =~ CD1_DAYyrL
+
+#STRUCTURAL MODEL
+sqrt_CD3_DAYyr ~ CINTd3 + TRUST + CONF + COMP + COLL + CALC + CONS
+CINTd3 ~ CONF + COMP + COLL + CALC + CONS + TRUST 
+CONF + COMP + COLL + CALC + CONS ~ TRUST
+
+#COVARIANCE
+COMP ~~ CONF + CALC + COLL + CONS
+CONF ~~ CALC + COLL + CONS
+CALC ~~ COLL + CONS
+COLL ~~ CONS
+
+CONF ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+COMP ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+COLL ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CALC ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CONS ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CINTd3 ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+sqrt_CD3_DAYyr ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+'
+
+
+CS_SEM <- lavaan::sem(model = sem_modelN, data = CS_NEAR3VACall, missing = "fiml", fixed.x = F)
+summary(CS_SEM, fit.measures = TRUE,  standardized = TRUE)
+modificationindices(CS_SEM, sort. = T)
+semPaths(CS_SEM, layout = "tree2", rotation = 2, structural = TRUE)
+
+
+
+
+
+
+############# ANALYSIS USING DATA AFTER VACCINE PASS ###################
+
+
+######################## SEM #########################
+### USING ONLY THE NEAREST DATA
+sem_modelNAV <- '
+#MEASUREMENT MODEL
+TRUST =~ CCONF_govinfo + CCONF_govmeas + CCONF_govable + CCONF_govdec + CCONF_govgen
+CONF =~ VHCONF1 + VHCONF2 + VHCONF3
+COMP =~ VHCOMP1 + VHCOMP2 + VHCOMP3
+CALC =~ VHCALC1 + VHCALC2 + VHCALC3
+COLL =~ VHCOLL2 + VHCOLL3
+CONS =~ VHCONS1 + VHCONS2 + VHCONS3
+
+#INT =~ CINTd3
+#INT =~ CINT
+#LAT =~ CD2_3GAPL
+#LAT =~ CD1_DAYyr
+#D1 =~ CD1_DAYyrL
+
+#STRUCTURAL MODEL
+CD3_DAYyr ~ TRUST + CONF + COMP + COLL + CALC + CONS + CINTd3 
+CINTd3 ~ CONF + COMP + COLL + CALC + CONS + TRUST 
+CONF + COMP + COLL + CALC + CONS ~ TRUST
+
+#COVARIANCE
+COMP ~~ CONF + CALC + COLL + CONS
+CONF ~~ CALC + COLL + CONS
+CALC ~~ COLL + CONS
+COLL ~~ CONS
+
+CONF ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+COMP ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+COLL ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CALC ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CONS ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CINTd3 ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CD3_DAYyr ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+'
+
+
+CS_SEM <- sem(model = sem_modelNAV, data = CS_NEAR3VACavr, missing = "fiml", fixed.x = F)
+summary(CS_SEM, fit.measures = TRUE)
+modificationindices(CS_SEM, sort. = T)
+semPaths(CS_SEM, layout = "tree2", rotation = 2, structural = TRUE)
+
+
+
+
+
+
+############# ANALYSIS USING ALL DATA ###################
+###### 4.  Filter participants vaccinated after the implementation of the vaccine pass
+#CS_LONGnmALL <- CS_LONGnm %>% filter(CD1_DAYVP>0)
+#CS_LONGnm3ALL <- CS_LONGnm3 %>% filter(CD3_DAYVP>0)
+
+###### 5. Filter participants without data after the vaccine rollout (a big time gap between data before and after vaccine rollout)
+CS_LONGnmALL <- CS_LONGnm %>% filter(ROUND >=7)
+CS_LONGnm3ALL <- CS_LONGnm3 %>% filter(ROUND >=10)
+
+
+#unique PID
+count(unique(CS_LONGnmALL$PID))
+count(unique(CS_LONGnm3ALL$PID))
+
+
+
+########## EXTRACT DATA NEAREST TO VACCINATION ############
+CS_NEARVACall <- CS_LONGnmALL %>%
+  group_by(PID) %>%
+  slice_min(CD1_ANSDAY, n = 1)
+
+CS_NEAR3VACall <- CS_LONGnm3ALL %>%
+  group_by(PID) %>%
+  slice_min(CD3_ANSDAY, n = 1)
+
+
+######################## SEM #########################
+### USING ONLY THE NEAREST DATA
+sem_modelNALL <- '
+#MEASUREMENT MODEL
+TRUST =~ CCONF_govinfo + CCONF_govmeas + CCONF_govable + CCONF_govdec + CCONF_govgen
+CONF =~ VHCONF1 + VHCONF2 + VHCONF3
+COMP =~ VHCOMP1 + VHCOMP2 + VHCOMP3
+CALC =~ VHCALC1 + VHCALC2 + VHCALC3
+COLL =~ VHCOLL2 + VHCOLL3
+CONS =~ VHCONS1 + VHCONS2 + VHCONS3
+
+#INT =~ CINTd3
+#INT =~ CINT
+#LAT =~ CD2_3GAPL
+#LAT =~ CD1_DAYyr
+#D1 =~ CD1_DAYyrL
+
+#STRUCTURAL MODEL
+CD3_DAYyr ~ TRUST + CONF + COMP + COLL + CALC + CONS + CINTd3 
+CINTd3 ~ CONF + COMP + COLL + CALC + CONS + TRUST 
+CONF + COMP + COLL + CALC + CONS ~ TRUST
+
+#COVARIANCE
+COMP ~~ CONF + CALC + COLL + CONS
+CONF ~~ CALC + COLL + CONS
+CALC ~~ COLL + CONS
+COLL ~~ CONS
+
+CONF ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+COMP ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+COLL ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CALC ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CONS ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CINTd3 ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+CD3_DAYyr ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+AEVAC
+'
+
+
+CS_SEM <- sem(model = sem_modelNALL, data = CS_NEAR3VACall, missing = "fiml", fixed.x = F)
+summary(CS_SEM, fit.measures = TRUE)
+modificationindices(CS_SEM, sort. = T)
+semPaths(CS_SEM, layout = "tree2", rotation = 2, structural = TRUE)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+############# VISUALIZATION ############
+# First get the first CONFIDENCE for each PID
+first_confidence <- CS_LONGnmVR %>%
+  arrange(PID, ansDATE) %>%  # Arrange the data first
+  group_by(PID) %>%  # Then group_by PID
+  dplyr::summarise(first_CONFIDENCE = first(CONFIDENCE))  # Obtain the first confidence for each PID group
+
+# Then join this back to the original data
+CS_LONGnmVR <- CS_LONGnmVR %>%
+  left_join(first_confidence, by = "PID")
+
+# Get the actual vaccination date data
+vaccination_data <- CS_LONGnmVR %>%
+  group_by(PID) %>%
+  filter(ansDATE == DateCD1)
+
+# Then create a plot
+ggplot(CS_LONGnmVR, aes(x = ansDATE, y = CONFIDENCE, group = PID, color = first_CONFIDENCE)) +
+  geom_line() +
+  geom_point(data = vaccination_data, aes(x = DateCD1, y = CONFIDENCE), color = "black", size = 3) +
+  scale_color_gradient(low = "red", high = "green") +  # adjust the colors to your preference
+  labs(x = "Date", y = "Confidence", color = "Initial Confidence") +
+  theme_minimal()
+
+
+
+
+##### APPROACH 2
+library(lubridate)
+
+CS_LONGnmVR$ansDATE <- as.Date(CS_LONGnmVR$ansDATE, format = "%Y-%m-%d")  # or adjust the format according to your actual date format
+
+# Interpolate the CONFIDENCE values for the vaccination dates
+vaccination_data <- CS_LONGnmVR %>%
+  arrange(PID, ansDATE) %>%
+  group_by(PID) %>%
+  complete(ansDATE = seq.Date(min(ansDATE), max(ansDATE), by = "day")) %>%
+  fill(PID, DateCD1, first_CONFIDENCE, .direction = "downup") %>%
+  filter(ansDATE == DateCD1) %>%
+  dplyr::select(PID, ansDATE, first_CONFIDENCE)
+
+# Then create a plot
+ggplot(CS_LONGnmVR, aes(x = ansDATE, y = CONFIDENCE, group = PID, color = first_CONFIDENCE)) +
+  geom_line() +
+  geom_point(data = vaccination_data, aes(x = ansDATE, y = first_CONFIDENCE), color = "black", size = 3) +
+  scale_color_gradient(low = "red", high = "green") +
+  labs(x = "Date", y = "Confidence", color = "Initial Confidence") +
+  theme_minimal()
+
+
+
+
+
+
+
+
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(zoo) # for the rollmean function
+
+# Sample data (replace this with your actual data)
+data <- data.frame(
+  participantID = rep(1:10, each = 3),
+  ansDATE = rep(as.Date(c("2021-01-01", "2021-02-01", "2021-03-01")), 10),
+  DateCD1 = rep(as.Date(c("2021-04-01", "2021-05-01", "2021-03-15", "2021-05-10", "2021-04-20", "2021-04-25", "2021-03-20", "2021-05-05", "2021-04-15", "2021-05-15")), each = 3),
+  TRUST = sample(5:10, 30, replace = TRUE),
+  ROUND = rep(1:3, 10)
+)
+
+# Aggregate TRUST by ansDATE
+data_aggregated <- data %>%
+  dplyr::group_by(ansDATE) %>%
+  dplyr::summarize(avg_TRUST = mean(TRUST, na.rm = TRUE), .groups = 'keep')
+
+
+# Calculate one-month moving average for aggregated TRUST
+data_aggregated$TRUST_MA <- zoo::rollmean(data_aggregated$avg_TRUST, k = 3, fill = NA, align = "right")
+
+# Plot
+ggplot() +
+  geom_line(data = data_aggregated, aes(x = ansDATE, y = TRUST_MA), color = "blue") +
+  geom_point(data = data_aggregated, aes(x = ansDATE, y = avg_TRUST), size = 3) +
+  geom_vline(data = distinct(data, DateCD1), aes(xintercept = as.numeric(DateCD1)), linetype="dashed", color="red") +
+  labs(title = "One-Month Moving Average of Institutional Trust",
+       x = "Date of Data Collection",
+       y = "Average Level of Trust") +
+  theme_minimal()
+
+
+
+
+
+
+
+
+######################## SEM USING ALL DATA #########################
+### USING ONLY THE NEAREST DATA
+sem_modelN <- '
+#MEASUREMENT MODEL
+TRUST =~ CCONF_govinfo + CCONF_govmeas + CCONF_govable + CCONF_govdec + CCONF_govgen
+CONF =~ VHCONF1 + VHCONF2 + VHCONF3
+COMP =~ VHCOMP1 + VHCOMP2 + VHCOMP3
+CALC =~ VHCALC1 + VHCALC2 + VHCALC3
+COLL =~ VHCOLL2 + VHCOLL3
+CONS =~ VHCONS1 + VHCONS2 + VHCONS3
+
+#INT =~ CINTd3
+#INT =~ CINT
+#LAT =~ CD2_3GAPL
+#LAT =~ CD1_DAYyr
+#D1 =~ CD1_DAYyrL
+
+#STRUCTURAL MODEL
+CD1_DAYyr ~ CINT + TRUST + CONF + COMP + COLL + CALC + CONS 
+CINT ~ CONF + COMP + COLL + CALC + CONS + TRUST 
+CONF + COMP + COLL + CALC + CONS ~ TRUST
+
+#COVARIANCE
+COMP ~~ CONF + CALC + COLL + CONS
+CONF ~~ CALC + COLL + CONS
+CALC ~~ COLL + CONS
+COLL ~~ CONS
+
+CONF ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+COMP ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+COLL ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+CALC ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+CONS ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+CINT ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+CD1_DAYyr ~ AGE29+AGE39+AGE49+AGE59+AGE69+WOMEN+ROUND+before_VP
+'
+
+
+CS_SEM <- sem(model = sem_modelN, data = CS_NEARVACall, missing = "fiml", fixed.x = F)
+summary(CS_SEM, fit.measures = TRUE)
+modificationindices(CS_SEM, sort. = T)
+semPaths(CS_SEM, layout = "tree2", rotation = 2, structural = TRUE)
+
+
+###### DESCRIPTIVE ######
+#frequency table with cum percent
+tab1(CS_NEAR3VACall$CD3_DAY, cum.percent = TRUE, decimal = 2)
+
+#latency by age group
+mean_by_age <- CS_NEARVACall %>%
+  group_by(AGE) %>%
+  summarise(mean_CD1_DAY = mean(CD1_DAY, na.rm = TRUE))
+
+mean_by_age3 <- CS_NEAR3VACall %>%
+  group_by(AGE) %>%
+  summarise(mean_CD3_DAY = mean(CD3_DAY, na.rm = TRUE))
+
+
+proportion_vaccinated_within_100_days <- CS_NEARVACall %>%
+  group_by(AGE) %>%
+  summarise(proportion = mean(CD1_DAY <= 100, na.rm = TRUE))
+print(proportion_vaccinated_within_100_days)
+
+
+proportion_vaccinated_within_100_days3 <- CS_NEAR3VACall %>%
+  group_by(AGE) %>%
+  summarise(proportion = mean(CD3_DAY <= 100, na.rm = TRUE))
+print(proportion_vaccinated_within_100_days3)
+
+print(proportion_vaccinated_within_100_days)
+
+
+
+tab1(CS_NEARVACall$CD1_DAY, cum.percent = TRUE, decimal = 2)
+
+
+
+
+######### PLOT VACCINATION POLICY ############
+
+
+library(ggplot2)
+library(dplyr)
+
+# Sample structure of your vaccination_policy dataframe
+vaccination_policy <- data.frame(
+  START_DATE = as.Date(c("2021-02-26", "2021-03-09", "2021-03-16", "2021-04-23", "2021-11-11", "2021-11-23", "2022-01-01","2021-05-21","2021-11-03", "2022-05-21", "2021-11-11","2022-03-05", "2022-03-21")),
+  END_DATE = as.Date(c("2021-03-09", "2021-03-16", "2021-04-23", "2022-11-30", "2021-11-23", "2022-01-01", "2022-11-30","2022-05-21","2022-11-30", "2022-11-30","2022-03-05","2022-11-30", "2022-11-30")),
+  DOSE = c("First Dose", "First Dose", "First Dose", "First Dose", "Third Dose", "Third Dose","Third Dose", "Buffer after Infection", "Buffer after Infection", "Buffer after Infection","Buffer between 2nd and 3rd Doses","Buffer between 2nd and 3rd Doses", "Buffer between 2nd and 3rd Doses"),
+  LABEL_DATE = as.Date(c("2021-02-26", "2021-03-09", "2021-03-16", "2021-04-23", "2021-11-11", "2021-11-23", "2022-01-01","2021-05-21","2021-11-03", "2022-05-21", "2021-11-11","2022-03-05", "2022-03-21")),
+  LABEL = c("A", "B", "C", "D", "E", "F", "G", "H: 90 days buffer after infection", "I: Only 1 dose required with infection", "J: Can take 3 doses with infection, 180 days buffer after 2nd dose or recovery", "K: 6 months","L","M: 3 months"),
+  AVAILABILITY_DOSE = c("Priority Groups", "Priority Groups","Priority Groups", "General Population", "Priority Groups", "General Population","General Population","Infection", "Infection", "Infection", "Buffer (Old)","Buffer (New)","Buffer (New)")
+)
+
+
+
+# Define colors for each phase and dose
+colors <- c("Priority Groups" = "darkblue", "General Population" = "lightblue" ,"Infection" = "pink", "Buffer (Old)" = "brown", "Buffer (New)" = "orange" )
+
+# Adjusting thickness for specific bars
+vaccination_policy <- vaccination_policy %>%
+  mutate(Thickness = case_when(
+    AVAILABILITY_DOSE %in% c("Infection", "Buffer (Old)", "Buffer (New)") ~ 0.2, # Half thickness for Buffer and Infection
+    TRUE ~ 0.4 # Default thickness for First and Third Dose
+  ))
+
+# Plotting with adjusted thickness
+p <- ggplot(data = vaccination_policy) +
+  geom_rect(aes(xmin = START_DATE, xmax = END_DATE, ymin = as.numeric(factor(DOSE)) - Thickness, ymax = as.numeric(factor(DOSE)) + Thickness, fill = AVAILABILITY_DOSE), alpha = 0.5) +
+  geom_text(aes(x = LABEL_DATE, y = as.numeric(factor(DOSE)) - Thickness - 0.1, label = LABEL, color = AVAILABILITY_DOSE), size = 4, fontface = "bold", hjust = 0, show.legend = FALSE) +
+  geom_segment(aes(x = LABEL_DATE, xend = LABEL_DATE, y = as.numeric(factor(DOSE)) + Thickness, yend = as.numeric(factor(DOSE)) + Thickness + 0.2), color = "black", linetype = "dotted") +
+  geom_text(aes(x = LABEL_DATE, y = as.numeric(factor(DOSE)) + Thickness + 0.3, label = format(LABEL_DATE, "%d-%b-%Y")), size = 3, color = "black", angle = 45, hjust = 1) +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(breaks = 1:2, labels = c("First Dose", "Third Dose")) +
+  scale_x_date(date_labels = "%b %Y", date_breaks = "1 month") +
+  labs(x = "Date", y = "", title = "Vaccination Policy Timeline in Hong Kong", fontface = "bold") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.title.align = 0.5)
+
+
+
+# Calculate positions for "First Dose" and "Third Dose" labels
+# Adjust these positions if necessary to ensure labels are fully visible
+first_dose_label_position <- mean(c(min(vaccination_policy$START_DATE[vaccination_policy$DOSE == "First Dose"]), max(vaccination_policy$END_DATE[vaccination_policy$DOSE == "First Dose"])))
+third_dose_label_position <- mean(c(min(vaccination_policy$START_DATE[vaccination_policy$DOSE == "Third Dose"]), max(vaccination_policy$END_DATE[vaccination_policy$DOSE == "Third Dose"])))
+infection_label_position <- mean(c(min(vaccination_policy$START_DATE[vaccination_policy$DOSE == "Buffer after Infection"]), max(vaccination_policy$END_DATE[vaccination_policy$DOSE == "Buffer after Infection"])))
+buffer_label_position <- mean(c(min(vaccination_policy$START_DATE[vaccination_policy$DOSE == "Buffer between 2nd and 3rd Doses"]), max(vaccination_policy$END_DATE[vaccination_policy$DOSE == "Buffer between 2nd and 3rd Doses"])))
+
+
+# Add labels for "First Dose" and "Third Dose" directly using geom_text()
+p <- p + geom_text(aes(x = first_dose_label_position, y = 3, label = "First Dose"), color = "black", size = 6, fontface = "bold", vjust = 0.5) +
+  geom_text(aes(x = third_dose_label_position, y = 4, label = "Third Dose"), color = "black", size = 6, fontface = "bold", vjust = 0.5) +
+  geom_text(aes(x = buffer_label_position, y = 2, label = "Buffer between 2nd & 3rd dose"), color = "black", size = 4, vjust = 0.5) +
+  geom_text(aes(x = infection_label_position, y = 1, label = "Buffer after infection"), color = "black", size = 4, vjust = 0.5)
+
+
+p <- p + 
+  geom_vline(xintercept = as.numeric(as.Date("2021-08-02")), linetype = "dotted", color = "green", size = 1, alpha = 0.5) +
+  geom_vline(xintercept = as.numeric(as.Date("2021-09-01")), linetype = "dotted", color = "green", size = 1, alpha = 0.5) +
+  geom_vline(xintercept = as.numeric(as.Date("2022-02-17")), linetype = "dotted", color = "red", size = 1, alpha = 0.5) +
+  geom_vline(xintercept = as.numeric(as.Date("2022-02-24")), linetype = "dotted", color = "red", size = 1, alpha = 0.5) +
+  geom_vline(xintercept = as.numeric(as.Date("2022-03-20")), linetype = "dotted", color = "blue", size = 1, alpha = 0.5) +
+  geom_vline(xintercept = as.numeric(as.Date("2022-05-31")), linetype = "dotted", color = "blue", size = 1, alpha = 0.5) +
+  geom_text(aes(x = as.Date("2021-08-02"), y = Inf, label = "Announcement"), vjust = 4, color = "darkgreen", size = 2.5, alpha = 0.5) +
+  geom_text(aes(x = as.Date("2021-09-01"), y = Inf, label = "N: Vaccination Requirement"), vjust = 1, color = "darkgreen", size = 4, alpha = 0.5, fontface = "bold") +
+  geom_text(aes(x = as.Date("2022-02-17"), y = Inf, label = "Announcement"), vjust = 4, color = "red", size = 2.5, alpha = 0.5) +
+  geom_text(aes(x = as.Date("2022-02-24"), y = Inf, label = "O: Vaccine Pass"), vjust = 1, color = "red", size = 4, alpha = 0.5, fontface = "bold") +
+  geom_text(aes(x = as.Date("2022-03-20"), y = Inf, label = "Announcement"), vjust = 4, color = "blue", size = 2.5, alpha = 0.5) +
+  geom_text(aes(x = as.Date("2022-05-31"), y = Inf, label = "P: Vaccine Pass Expansion"), vjust = 1, color = "blue", size = 4, alpha = 0.5, fontface = "bold")
+
+
+
+p <- p + labs(fill = "")
+
+# Save the plot as a high-resolution PNG
+ggsave(filename = "Vaccination policy.png", plot = p, width = 17.67, height = 4.63, dpi = 600)
+
+
+
+
+
+
+
+
+######## AGE SPECIFIC SURVIVAL CURVE ##########
+library(survival)
+library(ggplot2)
+library(survminer)
+
+
+####### FIRST DOSE #######
+# Create a Survival object for each individual
+CS_NEARVACall$surv_obj <- with(CS_NEARVACall, Surv(CD1_DAY, rep(1, nrow(CS_NEARVACall))))
+
+# Fit survival curves stratified by AGE_GROUP
+km_fit_age <- survfit(surv_obj ~ AGE, data = CS_NEARVACall)
+
+# Plot Kaplan-Meier curves for each age group without shading
+plot(km_fit_age, col = 1:6, lty = 1:6, xlab = "Days", ylab = "Probability of not being vaccinated of the 1st dose", main = "Kaplan-Meier Estimate by Age Group")
+legend("topright", legend = levels(factor(CS_NEARVACall$AGE, labels=c("18-24","25-34","35-44","45-54","55-64","65+"))), col = 1:6, lty = 1:6, title = "Age Group", cex=0.75)
+
+
+# Plotting the Kaplan-Meier curve
+abline(v = meanDaysToVR, col="blue", lty=2)
+abline(v = meanDaysToVP, col="red", lty=2)
+abline(v = meanDaysToAnnouncement, col="green", lty=2)
+
+
+# Adding a legend to the plot
+legend("right", legend=c("Vaccination requirement", "Vaccine pass", "Announcement of vaccine pass"), col=c("blue", "red", "green"), lty=2, cex=0.65)
+
+
+
+####### THIRD DOSE #######
+# Create a Survival object for each individual
+CS_NEAR3VACall$surv_obj <- with(CS_NEAR3VACall, Surv(CD3_DAY, rep(1, nrow(CS_NEAR3VACall))))
+
+# Fit survival curves stratified by AGE_GROUP
+km_fit_age <- survfit(surv_obj ~ AGE, data = CS_NEAR3VACall)
+
+# Plot Kaplan-Meier curves for each age group without shading
+plot(km_fit_age, col = 1:6, lty = 1:6, xlab = "Days", ylab = "Probability of not being vaccinated of the booster", main = "Kaplan-Meier Estimate by Age Group")
+legend("topright", legend = levels(factor(CS_NEARVACall$AGE, labels=c("18-24","25-34","35-44","45-54","55-64","65+"))), col = 1:6, lty = 1:6, title = "Age Group", cex=0.75)
+
+# Plotting the Kaplan-Meier curve
+abline(v = meanDaysToVP, col="red", lty=2)
+abline(v = meanDaysToAnnouncement, col="green", lty=2)
+
+
+# Adding a legend to the plot
+legend("right", legend=c("Adjustment of vaccine pass", "Announcement of adjustment of vaccine pass"), col=c("red", "green"), lty=2, cex=0.7)
+
+
+
+
+
+
+######### PLOT A NON-ADJUSTED GRAPH #########
+## FIRST DOSE ##
+
+# Calculate the number of days from the earliest vaccine date to VP implementation and announcement dates for each participant
+CS_NEARVACall$NADaysToVR <- as.numeric(difftime(as.Date("2021-09-01"), as.Date("2021-02-26"), units = "days"))
+CS_NEARVACall$NADaysToVP <- as.numeric(difftime(as.Date("2022-02-24"), as.Date("2021-02-26"), units = "days"))
+CS_NEARVACall$NADaysToAnnouncement <- as.numeric(difftime(as.Date("2022-02-17"), as.Date("2021-02-26"), units = "days"))
+
+
+CS_NEARVACall$surv_objNA <- with(CS_NEARVACall, Surv(CD1_DAYNA, rep(1, nrow(CS_NEARVACall))))
+#CS_NEARVAC$surv_obj <- with(CS_NEARVAC, Surv(CD1_DAY, rep(1, nrow(CS_NEARVAC)))) #sensitivity analysis without post mandate date
+
+km_fitNA <- survfit(surv_objNA ~ AGE, data = CS_NEARVACall)
+plot(km_fitNA, col = 1:6, lty = 1:6, xlab = "Days", ylab = "Probability of not being vaccinated of the 1st dose", main = "Kaplan-Meier Estimate by Age Group")
+legend("topright", legend = levels(factor(CS_NEARVACall$AGE, labels=c("18-24","25-34","35-44","45-54","55-64","65+"))), col = 1:6, lty = 1:6, title = "Age Group", cex=0.75)
+
+# Plotting the Kaplan-Meier curve
+abline(v = CS_NEARVACall$NADaysToVR , col="blue", lty=2)
+abline(v = CS_NEARVACall$NADaysToVP, col="red", lty=2)
+abline(v = CS_NEARVACall$NADaysToAnnouncement, col="green", lty=2)
+
+# Adding a legend to the plot
+legend("right", legend=c("Vaccination requirement", "Vaccine pass", "Announcement of vaccine pass"), col=c("blue", "red", "green"), lty=2, cex=0.6)
+
+
+
+
+
+##### THIRD DOSE #######
+
+# Calculate the number of days from the earliest vaccine date to VP implementation and announcement dates for each participant
+CS_NEAR3VACall$DaysToVP <- as.numeric(difftime(as.Date("2022-05-31"), as.Date("2021-11-11"), units = "days"))
+CS_NEAR3VACall$DaysToAnnouncement <- as.numeric(difftime(as.Date("2022-03-20"), as.Date("2021-11-11"), units = "days"))
+
+
+# Create a Survival object for each individual
+CS_NEAR3VACall$surv_obj <- with(CS_NEAR3VACall, Surv(CD3_DAYNA, rep(1, nrow(CS_NEAR3VACall))))
+
+# Fit survival curves stratified by AGE_GROUP
+km_fit_NA <- survfit(surv_obj ~ AGE, data = CS_NEAR3VACall)
+
+# Plot Kaplan-Meier curves for each age group without shading
+plot(km_fit_NA, col = 1:6, lty = 1:6, xlab = "Days", ylab = "Probability of not being vaccinated of the booster", main = "Kaplan-Meier Estimate by Age Group")
+legend("topright", legend = levels(factor(CS_NEARVACall$AGE, labels=c("18-24","25-34","35-44","45-54","55-64","65+"))), col = 1:6, lty = 1:6, title = "Age Group", cex=0.75)
+
+# Plotting the Kaplan-Meier curve
+abline(v = CS_NEAR3VACall$DaysToVP, col="red", lty=2)
+abline(v = CS_NEAR3VACall$DaysToAnnouncement, col="green", lty=2)
+
+
+# Adding a legend to the plot
+legend("right", legend=c("Adjustment of vaccine pass", "Announcement of adjustment of vaccine pass"), col=c("red", "green"), lty=2, cex=0.65)
+
+
+
+
+
+
+##### Calculate the data day range
+days_range <- CS_NEARVACall %>%
+  group_by(PID) %>%
+  summarise(days_range = as.numeric(difftime(max(startdate), min(startdate), units = "days")))
+
+# Print the result
+print(days_range)
+
+##### LATENCY BY AGE
+# Group by mean using dplyr
+agg_tbl <- CS_NEAR3VACall %>% dplyr::group_by(as.factor(AGE)) %>% 
+  dplyr::summarise(sd_latency=sd(CD3_DAY),.groups = 'drop')
+agg_tbl
+
+# Convert tibble to df
+df2 <- agg_tbl %>% as.data.frame()
+df2
+
+tab1(CS_NEAR3VACall$CD3_DAY,  cum.percent=TRUE, decimal = 2)
+
 
