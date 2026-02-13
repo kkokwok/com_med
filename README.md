@@ -6,7 +6,7 @@ This repository contains the processed datasets used in the article:
 
 [Communications Medicine]
 
-The data support analyses of vaccination latency for first and third COVID-19 doses using longitudinal survey responses and structural equation modeling (SEM).
+The data support analyses of vaccination latency for first and third COVID-19 doses using longitudinal survey responses, survival analyses and structural equation modeling (SEM).
 
 ## Files in this repository
 ## 1. CS_LONG_GITHUB.xlsx
