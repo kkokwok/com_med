@@ -1,4 +1,4 @@
-### COVID-19 Vaccination Latency Study 
+# COVID-19 Vaccination Latency Study 
 
 This repository contains the processed datasets used in the article:
 
@@ -11,10 +11,10 @@ The data support analyses of vaccination latency for first and third COVID-19 do
 ## Files in this repository
 ## 1. CS_LONG_GITHUB.xlsx
 
-# Purpose
+### Purpose
 Primary analysis dataset used in all latency models, including the latency SEM.
 
-# Structure
+### Structure
 
 * Long format (one row = one participant × one survey round)
 
@@ -24,7 +24,7 @@ Primary analysis dataset used in all latency models, including the latency SEM.
 
   * ROUND: survey wave (1–13)
 
-# Contents
+### Contents
 
 * Repeated measures:
 
@@ -42,7 +42,7 @@ Primary analysis dataset used in all latency models, including the latency SEM.
 
 * Policy timing indicators (e.g., vaccine rollout, vaccine pass periods)
 
-# Notes
+### Notes
 
 * All variables required for the published latency SEM are contained in this file.
 
@@ -50,14 +50,14 @@ Primary analysis dataset used in all latency models, including the latency SEM.
 
 ## 2. CS_MATCH_GITHUB.xlsx
 
-# Purpose
+### Purpose
 Participant-level reference dataset used to construct vaccination timelines and eligibility logic.
 
-# Structure
+### Structure
 
 * One row per participant (PID)
 
-# Contents
+### Contents
 
 * Consolidated vaccination dates across survey waves
 
@@ -67,7 +67,7 @@ Participant-level reference dataset used to construct vaccination timelines and 
 
 * Auxiliary indicators used during latency construction
 
-# Notes
+### Notes
 
 * This dataset is not used directly in model estimation
 
