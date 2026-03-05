@@ -114,3 +114,126 @@ No additional raw data files are required.
 * All data are anonymized prior to sharing
 
 * Participant IDs are non-identifiable study codes
+
+## Code used to generate manuscript figures
+
+The Kaplan–Meier survival curves reported in **Figure 1** and **Figure 2** are generated in the survival analysis section of the R script.
+
+### Figure 1(a): Kaplan–Meier, First Dose (overall)
+
+This panel is produced by the block under:
+
+```
+############################### SURVIVAL ANALYSIS ##################################
+######## FIRST DOSE ########
+```
+
+Key code lines:
+
+```r
+CS_NEARVACall$surv_obj <- with(CS_NEARVACall, Surv(CD1_DAY, rep(1, nrow(CS_NEARVACall))))
+km_fit <- survfit(surv_obj ~ 1, data = CS_NEARVACall)
+
+plot(km_fit,
+     main="Kaplan-Meier Estimate of Vaccination Delay",
+     xlab="Days",
+     ylab="Probability of not being vaccinated of the 1st dose")
+
+abline(v = meanDaysToVR, col="blue", lty=2)
+abline(v = meanDaysToVP, col="red", lty=2)
+abline(v = meanDaysToAnnouncement, col="green", lty=2)
+```
+
+---
+
+### Figure 1(b): Kaplan–Meier, Third Dose (overall)
+
+This panel is produced by the block under:
+
+```
+############################### SURVIVAL ANALYSIS ##################################
+######### THIRD DOSE ##########
+####### ADD ANNOUNCEMENT DATE (USE IN MANUSCRIPT)
+```
+
+Key code lines:
+
+```r
+CS_NEAR3VACall$surv_obj <- with(CS_NEAR3VACall, Surv(CD3_DAY, rep(1, nrow(CS_NEAR3VACall))))
+km_fit <- survfit(surv_obj ~ 1, data = CS_NEAR3VACall)
+
+plot(km_fit,
+     main="Kaplan-Meier Estimate of Vaccination Delay",
+     xlab="Days",
+     ylab="Probability of not being vaccinated of the booster")
+
+abline(v = meanDaysToVP, col="red", lty=2)
+abline(v = meanDaysToAnnouncement, col="green", lty=2)
+```
+
+---
+
+### Figure 2(a): Kaplan–Meier, First Dose by Age Group
+
+This panel is produced by the block under:
+
+```
+######## AGE SPECIFIC SURVIVAL CURVE ##########
+####### FIRST DOSE #######
+```
+
+Key code lines:
+
+```r
+CS_NEARVACall$surv_obj <- with(CS_NEARVACall, Surv(CD1_DAY, rep(1, nrow(CS_NEARVACall))))
+km_fit_age <- survfit(surv_obj ~ AGE, data = CS_NEARVACall)
+
+plot(km_fit_age,
+     col = 1:6,
+     lty = 1:6,
+     xlab = "Days",
+     ylab = "Probability of not being vaccinated of the 1st dose",
+     main = "Kaplan-Meier Estimate by Age Group")
+```
+
+---
+
+### Figure 2(b): Kaplan–Meier, Third Dose by Age Group
+
+This panel is produced by the block under:
+
+```
+######## AGE SPECIFIC SURVIVAL CURVE ##########
+####### THIRD DOSE #######
+```
+
+Key code lines:
+
+```r
+CS_NEAR3VACall$surv_obj <- with(CS_NEAR3VACall, Surv(CD3_DAY, rep(1, nrow(CS_NEAR3VACall))))
+km_fit_age <- survfit(surv_obj ~ AGE, data = CS_NEAR3VACall)
+
+plot(km_fit_age,
+     col = 1:6,
+     lty = 1:6,
+     xlab = "Days",
+     ylab = "Probability of not being vaccinated of the booster",
+     main = "Kaplan-Meier Estimate by Age Group")
+```
+
+---
+
+## Key variables used in survival analyses
+
+| Variable | Description |
+|---------|-------------|
+| `PID` | Unique participant identifier |
+| `ROUND` | Survey wave number |
+| `DateCD1` | Date of first COVID-19 vaccine dose |
+| `DateCD3` | Date of third (booster) dose |
+| `CD1_DAY` | Vaccination latency in days for the first dose |
+| `CD3_DAY` | Vaccination latency in days for the third dose |
+| `AGE` | Age group used for stratified survival curves |
+| `meanDaysToVR` | Time point of vaccination requirement implementation |
+| `meanDaysToVP` | Time point of vaccine pass implementation |
+| `meanDaysToAnnouncement` | Time point of vaccine pass announcement |
